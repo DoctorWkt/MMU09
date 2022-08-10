@@ -1,0 +1,16 @@
+RCS
+MMU09-backups
+logs
+fp-info-cache
+incremental_db
+obj_dir
+db
+output_files
+simulation
+MMU09.dsn
+MMU09.rules
+MMU09.ses
+Misc
+MMU09_MMU_Decode_pins.csv
+tests
+Datasheets
