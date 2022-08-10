@@ -1,0 +1,7 @@
+(sym_lib_table
+  (lib (name "New_Library")(type "KiCad")(uri "${KIPRJMOD}/New_Library.kicad_sym")(options "")(descr ""))
+  (lib (name "AT28C64-25PI")(type "Legacy")(uri "${KIPRJMOD}/Parts/AT28C64-25PI.lib")(options "")(descr ""))
+  (lib (name "DS12C887")(type "Legacy")(uri "${KIPRJMOD}/Parts/DS12C887.lib")(options "")(descr ""))
+  (lib (name "DS1233-10+")(type "Legacy")(uri "${KIPRJMOD}/Parts/DS1233-10+.lib")(options "")(descr ""))
+  (lib (name "ATF1508AS-10JU84")(type "Legacy")(uri "${KIPRJMOD}/Parts/ATF1508AS-10JU84.lib")(options "")(descr ""))
+)

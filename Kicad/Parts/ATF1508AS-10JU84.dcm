@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP ATF1508AS-10JU84
+D Microchip Technology ATF1508AS-10JU84, CPLD ATF1508AS EEPROM 128 Cells, 84 I/O, 128 Labs, 10ns, ISP, 84-Pin PLCC
+K
+F http://ww1.microchip.com/downloads/en/DeviceDoc/doc0784.pdf
+$ENDCMP
+#
+#End Doc Library
