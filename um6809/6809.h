@@ -46,6 +46,13 @@ typedef signed int INT32;
 extern UINT8 *memory;
 
 /* 6809.c */
+extern unsigned X, Y, S, U, PC;
+extern unsigned A, B, DP;
+extern unsigned H, N, Z, V, C;
+extern unsigned EFI;
+extern unsigned iPC;
+extern UINT8 *memory;
+
 extern int cpu_quit;
 extern int cpu_execute (int);
 extern void cpu_reset (void);
@@ -83,5 +90,8 @@ extern void add_breakpoint (int break_pc);
 extern int load_hex (char *);
 extern int load_s19 (char *);
 extern int load_bin (char *,int);
+
+// oscode.c
+extern void swi2 (void);
 
 #endif /* M6809_H */

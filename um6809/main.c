@@ -104,11 +104,11 @@ int main (int argc, char *argv[])
   }  
 
   monitor_init();
+  monitor_on = 0;	// Don't start the monitor unless a breakpoint
 
   // If there's a breakpoint, set it
   if (breakpoint != -1) {
     add_breakpoint(breakpoint);
-    monitor_on = 0;
     do_break = 1;
   }
 

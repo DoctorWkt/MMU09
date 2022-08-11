@@ -11,8 +11,11 @@ monitor.o: monitor.c
 main.o: main.c
 	$(CC) $(CFLAGS) -c main.c
 
-um6809: 6809.o monitor.o main.o
-	$(CC) $(CFLAGS) -o um6809 main.o monitor.o 6809.o -lreadline
+oscode.o: oscode.c
+	$(CC) $(CFLAGS) -c oscode.c
+
+um6809: 6809.o monitor.o main.o oscode.o
+	$(CC) $(CFLAGS) -o um6809 main.o monitor.o 6809.o oscode.o -lreadline
 
 clean:
 	rm -f um6809 *.o
