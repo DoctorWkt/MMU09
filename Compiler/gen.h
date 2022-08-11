@@ -2,6 +2,17 @@
 // Copyright (c) 2022 Warren Toomey, GPL3
 
 enum {
+				// These operations deal with data declarations
+  IR_ASCII,			// Define an ASCII string
+  IR_ENDASCII,			// End an ASCII string
+  IR_DATA,			// Local data with name
+  IR_GDATA,			// Global data with name
+  IR_PVAL,			// A pointer value for (G)DATA
+  IR_BVAL,			// A byte value for (G)DATA
+  IR_WVAL,			// A word value for (G)DATA
+  IR_DVAL,			// A doubleword value for (G)DATA
+
+				// These operations are actual instructions
   IR_NOP,			// No instruction, can be ignored
   IR_LABEL,			// A label, not an instruction
   IR_LINENUM,			// A line number
@@ -15,21 +26,11 @@ enum {
   IR_CALL,			// Call a function
   IR_ARG,			// Argument to a function call
   IR_RETURN,			// Return from a function
-  IR_ASCII,			// Define an ASCII string
-  IR_ENDASCII,			// End an ASCII string
-  IR_DATA,			// Local data with name
-  IR_GDATA,			// Global data with name
-  IR_PVAL,			// A pointer value for (G)DATA
-  IR_BVAL,			// A byte value for (G)DATA
-  IR_WVAL,			// A word value for (G)DATA
-  IR_DVAL,			// A doubleword value for (G)DATA
 
 				// The following instructions cause the
 				// type of the destination register to
 				// be recorded if there is no label
 
-  IR_LDI,			// Load register with immediate value
-  IR_LD,			// Load register from memory
   IR_CEQ,			// Comparison operations
   IR_CNE,
   IR_CLT,			// Interpretation: if there is a label
@@ -37,7 +38,11 @@ enum {
   IR_CLE,			// these as a jump if comparison is true
   IR_CGE,
   IR_CEQI,			// Compare against an immediate value
-  IR_CNEI,			
+  IR_CNEI,
+
+				// The following instructions cause the
+				// type of the destination register to
+				// be recorded always
   IR_MOV,			// Move between registers
   IR_ADD,
   IR_SUB,
@@ -59,14 +64,11 @@ enum {
   IR_NEG,			// Negate
   IR_INV,			// Invert
   IR_NOT,			// Logical not
-
-				// The following instructions cause the
-				// type of the destination register to
-				// be recorded always
-
   IR_CAST,			// Label holds the old type
   IR_LDLAB,			// Load the address of a label
   IR_LEA,			// Load effective address
+  IR_LDI,			// Load register with immediate value
+  IR_LD				// Load register from memory
 };
 
 

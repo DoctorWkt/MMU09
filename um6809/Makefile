@@ -1,0 +1,18 @@
+CFLAGS := -Wall -g
+
+default: um6809
+
+6809.o: 6809.c
+	$(CC) $(CFLAGS) -c 6809.c
+
+monitor.o: monitor.c
+	$(CC) $(CFLAGS) -c monitor.c
+
+main.o: main.c
+	$(CC) $(CFLAGS) -c main.c
+
+um6809: 6809.o monitor.o main.o
+	$(CC) $(CFLAGS) -o um6809 main.o monitor.o 6809.o -lreadline
+
+clean:
+	rm -f um6809 *.o

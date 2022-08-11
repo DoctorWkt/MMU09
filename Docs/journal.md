@@ -482,8 +482,7 @@ compiler. I can still add in some SWI systems to the C simulator and try it out.
 
 ## Tue 09 Aug 2022 08:34:09 AEST
 
-I don't like `cmoc`, maybe because of the look of it's output. So I'm
-redoing `acwj`. This time with an intermediate representation. I've got
+I don't like `cmoc`, maybe because of the look of it's output. So I'm redoing `acwj`. This time with an intermediate representation. I've got
 most of it done, but no 6809 code generation as yet.
 
 ## Tue 09 Aug 2022 10:42:12 AEST
@@ -503,12 +502,124 @@ a good start.
 I can manually cast (int)23 to get a 16-bit literal and that works. I still
 have to work out why the compiler isn't casting to function call arguments.
 
+## Thu 11 Aug 2022 12:22:31 AEST
+
+I'm now manually changing the type of INTLIST AST nodes to match the type
+of a function's parameter. Ugly but it works. I can now compile and run
+a C program with no hand twiddling.
+
 The commands are:
 
 ```
 ./cwj -S fred.c
-lwasm -f obj fred.s
+lwasm -f obj -o fred.o fred.s
 lwlink -f srec --section-base=text=0x100 --section-base=registers=0xc0 -L /home/wkt/wktcloud/MMU09/Compiler/lib -o fred fred.o -lc
-um6809 -b 0 z
+um6809 -b 0 fred
 ```
 
+I also threw up all I've done so far into a Github repository, so others
+can have a look at it.
+
+## Thu 11 Aug 2022 13:24:16 AEST
+
+I'm getting frustrated with my compiler, so I'm going back to `cmoc`.
+I've been able to compile a program, link it with my `crt0.s` and run
+on `um6809`. But more work to get it done with no hand waving.
+
+Yay, I'm getting somewhere. I had to set up the `SYNC` instruction in the
+user-mode simulator to do `exit()`. Now, this all works. Firstly, `fred.c`:
+
+```
+extern void printint(int x);
+extern void exit();
+extern void myexit();
+
+int a;
+char b;
+
+void main()
+{ a= 5; printint(a );
+  myexit();
+  b= 7; printint(b);
+}
+```
+
+Now the `crt0.s`:
+
+```
+        section code
+
+_printint
+        export _printint
+        lda #1
+        swi2
+        rts
+
+_myexit
+        export _myexit
+        sync			; Both the SYNC
+        lda #0
+        swi2			; and the SWI2 work, don't need both
+        rts
+```
+
+And the compile line:
+
+```
+cmoc -nodefaultlibs --org=100 --srec  -o fred fred.c -L lib -lc
+```
+
+I have to define my own `exit()` as the one that `cmoc` uses should execute `SYNC`
+but I can't make it happen yet.
+
+## Thu 11 Aug 2022 14:31:50 AEST
+
+Getting closer. If I do this:
+
+```
+cmoc -nodefaultlibs --org=100 --usim --srec  -o fred fred.c -L lib -lc
+```
+
+then I can have this `fred.c`:
+
+```
+extern void printint(int x);
+extern void exit(int x);
+
+int a;
+char b;
+
+int main()
+{ a= 5; printint(a);
+  b= 7; printint(b);
+  return(0);
+}
+```
+
+The `cmoc` startup code does a heap of stuff that I don't think I need.
+So I need to find a way to define a new `cmoc` target, and then `ifdef`
+the startup code to only do what I need.
+
+## Fri 12 Aug 2022 08:01:15 AEST
+
+I changed the `crt.asm` code to just be this:
+
+```
+    IFDEF _CMOC_MMU09_TARGET_
+_main                   IMPORT
+_exit                   EXPORT
+INILIB                  EXPORT
+INILIB
+    JSR _main
+_exit
+    LDA #0
+    SWI2
+```
+
+and I changed `cmoc` itself to have MMU09 as the default platform, so
+I can now do this compile command: `cmoc -o fred fred.c -L lib -lc`
+
+What I want to do now is to do a full 'Apout' to the user-mode simulator,
+so I can run binaries with argv[] etc. and with no initial breakpoint.
+Then, take a userland like 2.11BSD cmds+lib and build it. I'll use 2.11BSD
+as it's a 16-bit system.

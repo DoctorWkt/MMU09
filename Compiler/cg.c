@@ -6,6 +6,9 @@
 // Code generator for the 6809.
 // Copyright (c) 2022 Warren Toomey, GPL3
 
+// Are we in the text or data section
+static int in_text= 1;
+
 // Given a scalar type value, return the
 // size of the QBE type in bytes.
 int cgprimsize(int type) {
@@ -47,6 +50,7 @@ void cgpreamble(char *filename) {
     fprintf(Outfile, ".r%d\textern\n", i);
   fprintf(Outfile, "printint\textern\n");
   fprintf(Outfile, "\tsection text\n");
+  in_text= 1;
 }
 
 void cgpostamble(void) {
@@ -61,8 +65,24 @@ void cgenerate(void) {
   n= IRlist;
   for (i=0; i< irposn; i++, n++) {
 
-    // Skip line numbers
-    if (n->opcode == IR_LINENUM) continue;
+    // Do data handling opcodes in the data section
+    if ((n->opcode <= IR_DVAL) && in_text) {
+      fprintf(Outfile, "\tsection data\n"); in_text= 0;
+    }
+    if ((n->opcode > IR_DVAL) && !in_text) {
+      fprintf(Outfile, "\tsection text\n"); in_text= 1;
+    }
+
+    // Do some opcodes regardless of size
+    switch (n->opcode) {
+      case IR_LINENUM: continue;		// Skip line numbers
+      case IR_GDATA: fprintf(Outfile,"\texport %s\n", n->dstname);
+      case IR_DATA:  fprintf(Outfile, "%s", n->dstname); continue;
+      case IR_PVAL: fprintf(Outfile, "\tFDB 0x%lx\n", n->src); continue;
+      case IR_BVAL: fprintf(Outfile, "\tFCB %ld\n", n->src); continue;
+      case IR_WVAL: fprintf(Outfile, "\tFDB %ld\n", n->src); continue;
+      case IR_DVAL: fprintf(Outfile, "\tFQB %ld\n", n->src); continue;
+    }
 
     // Work out the data size for the instruction
     size= cgprimsize(n->type);
@@ -117,12 +137,22 @@ void cgenerate(void) {
       case 1: switch(n->opcode) {
         case IR_LDI:  fprintf(Outfile,"\tlda #%ld\n", n->src);
         	      fprintf(Outfile,"\tsta <.r%d\n", n->dest); break;
+        case IR_LD:   fprintf(Outfile,"\tlda %s\n", n->dstname);
+        	      fprintf(Outfile,"\tsta <.r%d\n", n->dest); break;
+        case IR_ST:   fprintf(Outfile,"\tlda <.r%ld\n", n->src);
+		      fprintf(Outfile,"\tsta %s\n", n->dstname); break;
 	case IR_ARG: break;
 	default: printf("cg to handle IR opcode %d size 1\n", n->opcode);
       }
       break;
 
       case 2: switch(n->opcode) {
+        case IR_LDI:  fprintf(Outfile,"\tldd #%ld\n", n->src);
+        	      fprintf(Outfile,"\tstd <.r%d\n", n->dest); break;
+        case IR_LD:   fprintf(Outfile,"\tldd %s\n", n->dstname);
+        	      fprintf(Outfile,"\tstd <.r%d\n", n->dest); break;
+        case IR_ST:   fprintf(Outfile,"\tldd <.r%ld\n", n->src);
+		      fprintf(Outfile,"\tstd %s\n", n->dstname); break;
 	case IR_CAST:
 		// Get the size of the old type
     		size= cgprimsize(n->label);

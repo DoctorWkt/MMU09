@@ -87,7 +87,7 @@ int add_instruction(int opcode, int type, int dest,
 
   // If this instruction alters a destination register, then
   // record the type of the register.
-  if ((opcode >= IR_CAST) || ((opcode >= IR_LDI) && (label==0)))
+  if ((opcode >= IR_MOV) || ((opcode >= IR_CEQ) && (label==0)))
     regtype[dest]= type;
   irposn++;
   return(dest);
@@ -401,6 +401,7 @@ static int genSWITCH(struct ASTnode *n) {
 
   // Now output the end label.
   add_instruction(IR_LABEL, 0, 0, 0, NULL, Lend);
+  free(caselabel);
   return (NOREG);
 }
 
@@ -448,7 +449,8 @@ static int gen_logandor(struct ASTnode *n) {
 // the function's return value.
 static int gen_funccall(struct ASTnode *n) {
   struct ASTnode *gluetree = n->left;
-  struct symtable *param = n->sym->member;
+  struct symtable **paramlist;
+  struct symtable *p;
   int i,reg;
   int numargs = 0;
   int *arglist = NULL;
@@ -458,20 +460,41 @@ static int gen_funccall(struct ASTnode *n) {
     numargs++;
   }
 
+  // Check if the argument count matches the param count
+  if (numargs != n->sym->nelems)
+    fatald("Incorrect number of arguments in function call", numargs);
+
   // Allocate an array to record which registers hold the arguments
   if (numargs != 0) {
     arglist = (int *) malloc(numargs * sizeof(int));
     if (arglist == NULL)
-      fatal("malloc failed in gen_funccall");
+      fatal("arglist malloc failed in gen_funccall");
+
+    // Also allocate an array of parameter symbols. We do this because
+    // the param linked list is left to right, but the argument list
+    // is right to left.
+    paramlist = (struct symtable **) malloc(numargs * sizeof(struct symtable *));
+    if (paramlist == NULL)
+      fatal("paramlist malloc failed in gen_funccall");
+
+    // Copy the parameter pointers into the array
+    for (i=0, p= n->sym->member; i< numargs; i++, p= p->next)
+      paramlist[i]= p;
   }
 
   // Push all the in-use registers on the stack
   irpushregs();
 
   // Calculate the expression's value for any arguments
-  for (i=numargs-1, gluetree = n->left; gluetree != NULL; gluetree = gluetree->left) {
+  for (i=numargs-1, gluetree= n->left; gluetree != NULL; gluetree= gluetree->left, i--) {
+
+    // Slightly dirty hack: change any INTLIT type to be the same type
+    // as the function's parameter before we evaluate it
+    if (gluetree->right->op == A_INTLIT) {
+      gluetree->right->type= paramlist[i]->type;
+    }
     reg = genAST(gluetree->right, NOLABEL, NOLABEL, NOLABEL, gluetree->op);
-    arglist[i--]= reg;
+    arglist[i]= reg;
   }
 
   // Call the function
@@ -482,9 +505,8 @@ static int gen_funccall(struct ASTnode *n) {
 
     // Store the parameter type in the IR label 
     add_instruction(IR_ARG, regtype[arglist[i]], 0, arglist[i], NULL,
-	param->type);
-    param= param->next;
-  // Mark all the register arguments as not in use
+	paramlist[i]->type);
+    // Mark the register argument as not in use
     freereg(arglist[i]);
   }
 
@@ -503,6 +525,8 @@ static int gen_funccall(struct ASTnode *n) {
   
   // Pop the in-use registers from the stack and return the result
   irpopregs(reg);
+  if (arglist) free(arglist);
+  if (paramlist) free(paramlist);
   return(reg);
 }
 
@@ -807,10 +831,11 @@ void genglobsym(struct symtable *node) {
     type = node->type;
   }
 
-  // Output the identity and if it is globally visible
+  // Output the identity and if it is globally visible.
+  // Label holds the size
   if (node->class == C_GLOBAL)
     op= IR_GDATA;
-  add_instruction(op, 0, 0, 0, node->name, 0);
+  add_instruction(op, type, 0, 0, node->name, size);
 
   // Output space for one or more elements
   for (i = 0; i < node->nelems; i++) {
@@ -860,13 +885,13 @@ int genalign(int type, int offset, int direction) {
 
 // List of IR instruction opcodes
 static char *iropname[] = {
+  "ascii", "endascii", "data", "gdata", "pval", "bval", "wval", "dval",
   "nop", "label", "linenum", "function", "gfunction", "param",
   "local", "jmp", "push", "pop", "call", "arg", "ret",
-  "ascii", "endascii", "data", "gdata", "pval", "bval", "wval", "dval",
-  "ldi", "ld", "ceq", "cne", "clt", "cgt", "cle", "cge", "ceqi",
-  "cnei", "mov", "add", "sub", "mul", "div", "mod", "and", "or",
+  "ceq", "cne", "clt", "cgt", "cle", "cge", "ceqi", "cnei",
+  "mov", "add", "sub", "mul", "div", "mod", "and", "or",
   "xor", "shl", "shr", "addi", "st", "stdr", "widen", "lddr", "shli",
-  "shri", "neg", "inv", "not", "cast", "ldlab", "lea"
+  "shri", "neg", "inv", "not", "cast", "ldlab", "lea", "ldi", "ld"
 };
 
 static char irtype(int type) {
@@ -915,8 +940,8 @@ void print_irlist(void) {
       case IR_POP: printf("     pop%c\tr%d\n",type,n->dest); break;
       case IR_ASCII: printf("     ASCII \"%s\"\n", n->dstname); break;
       case IR_ENDASCII: printf("     ASCIIZ\n"); break;
-      case IR_DATA: printf("%s\tdata\n", n->dstname); break;
-      case IR_GDATA: printf("%s\tgdata\n", n->dstname); break;
+      case IR_DATA: printf("%s\tdata%c %d\n", n->dstname, type, n->label); break;
+      case IR_GDATA: printf("%s\tgdata%c %d\n", n->dstname, type, n->label); break;
       case IR_PVAL: printf("     pval\t%ld\n", n->src); break;
       case IR_BVAL: printf("     bval\t%ld\n", n->src); break;
       case IR_WVAL: printf("     wval\t%ld\n", n->src); break;

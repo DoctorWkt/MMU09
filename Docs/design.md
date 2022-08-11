@@ -68,13 +68,13 @@ can still be read or written. However, the CPLD sends an `NMI` to the CPU on
 the access, which is picked up by the kernel. So, what use is this?
 
 Imagine there are three user-mode processes on the system, each with one 8K page
-starting at `$0000` for machine code and data and another 8K page at `$C000` for
+starting at `$0000` for machine code and data and another 8K page at `$E000` for
 a stack. We have thus allocated six of the sixty-four RAM pages. Let's now set
 aside one more page, page frame 23, mark it as invalid, and map it into the
-address space of all three processes at `$8000`; this will be a guard page below
+address space of all three processes at `$C000`; this will be a guard page below
 the three stack pages.
 
-The first process to grow their stack down below `$C000` will cause an NMI. The
+The first process to grow their stack down below `$E000` will cause an NMI. The
 kernel is started up and sees this access. The kernel can now allocate page frame
 23 to the process that performed the access, and mark it as valid. We now choose
 another spare page frame, e.g. frame number 31, mark it as invalid, and map it
