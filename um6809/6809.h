@@ -43,14 +43,7 @@ typedef signed int INT32;
 #define V_FLAG 0x02
 #define C_FLAG 0x01
 
-extern UINT8 *memory;
-
 /* 6809.c */
-extern unsigned X, Y, S, U, PC;
-extern unsigned A, B, DP;
-extern unsigned H, N, Z, V, C;
-extern unsigned EFI;
-extern unsigned iPC;
 extern UINT8 *memory;
 
 extern int cpu_quit;
