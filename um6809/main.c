@@ -22,18 +22,13 @@
 
 enum { HEX, S19, BIN };
 
-static char *Options[]=
-{
- "hex","s19","bin","s","b",NULL
-};
-
 int total = 0;
 
 char *exename;
 
 static void usage (void)
 {
-  printf("Usage: %s <options> filename\n",exename);
+  printf("Usage: %s <options> filename [arguments ...]\n",exename);
   printf("Options are:\n");
   printf("-hex	- load intel hex file\n");
   printf("-s19	- load motorola s record file\n");
@@ -42,65 +37,72 @@ static void usage (void)
   printf("-b addr - set a breakpoint in hex and run until that address\n");
   printf("default format is motorola s record\n");
 
-  if(memory != NULL) free(memory);
+  if (memory != NULL) free(memory);
   exit (1);
 }
 
 
-int main (int argc, char *argv[])
+int main (int argc, char **argv)
 {
-  char *name;
   int type = S19;
   int off  = 0;
-  int i, j, n;
   int breakpoint= -1;
 
-  exename = argv[0];
-
-  if (argc == 1) usage();
- 
-  for (i=1,n=0;i<argc;++i)
-  {
-    if (argv[i][0]!='-')
-    {
-      switch (++n)
-      {
-        case 1:  name=argv[i]; break;
-        default: usage();
-      }
-    }
-    else
-    {
-      for (j=0;Options[j];j++) if (!strcmp(argv[i]+1,Options[j])) break;
-      switch (j)
-      {
-        case 0:  type = HEX;  break;
-        case 1:  type = S19;  break;
-        case 2:  type = BIN;  break;
-        case 3:  i++; if (i>argc) usage();
-                 off  = strtoul(argv[i],NULL,16);
-                 type = BIN;
-                 break;
-	case 4:  i++; if (i>argc) usage();
-		 breakpoint= strtoul(argv[i],NULL,16); break;
-
-        default: usage();
-      }
-    }
-  }
-
   memory = (UINT8 *)malloc(64 * 1024);		// Allocate 6K of RAM
-
   if (memory == NULL) usage();
   memset (memory, 0, 0x10000);
 
+  cpu_reset();
+
+  exename = argv[0];
+  if ((argc < 2) || !strcmp(argv[1], "-help") ||
+     !strcmp(argv[1], "--help")) usage();
+
+  // Skip past the "um6809" argument
+  argc--; argv++;
+  
+  while (1) {
+    if (argc < 1) usage();
+
+    if (!strcmp(argv[0], "-hex")) {
+      type = HEX; argc--; argv++; continue;
+    }
+
+    if (!strcmp(argv[0], "-s19")) {
+      type = S19; argc--; argv++; continue;
+    }
+
+    if (!strcmp(argv[0], "-bin")) {
+      type = BIN; argc--; argv++; continue;
+    }
+
+    if (!strcmp(argv[0], "-s")) {
+      argc--; argv++;
+      if (argc<1) usage();
+      off  = strtoul(argv[0],NULL,16); type = BIN;
+      argc--; argv++; continue;
+    }
+
+    if (!strcmp(argv[0], "-b")) {
+      argc--; argv++;
+      if (argc<1) usage();
+      breakpoint= strtoul(argv[0],NULL,16);
+      argc--; argv++; continue;
+    }
+
+    break;
+  }
+
+  // Set up the argument and environment list
+  set_arglist(argc, argv);
+ 
   cpu_quit = 1;
 
   switch (type)
   {
-    case HEX: if(load_hex(name)) usage(); break;
-    case S19: if(load_s19(name)) usage(); break;
-    case BIN: if(load_bin(name,off&0xffff)) usage(); break;
+    case HEX: if(load_hex(argv[0])) usage(); break;
+    case S19: if(load_s19(argv[0])) usage(); break;
+    case BIN: if(load_bin(argv[0],off&0xffff)) usage(); break;
   }  
 
   monitor_init();
@@ -112,8 +114,6 @@ int main (int argc, char *argv[])
     do_break = 1;
   }
 
-  cpu_reset();
-  // printf ("AS,JF, 1.2, file %s\n",name);
   do
   {
     total += cpu_execute (60);

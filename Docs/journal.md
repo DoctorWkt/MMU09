@@ -530,14 +530,14 @@ Yay, I'm getting somewhere. I had to set up the `SYNC` instruction in the
 user-mode simulator to do `exit()`. Now, this all works. Firstly, `fred.c`:
 
 ```
-extern void printint(int x);
-extern void exit();
-extern void myexit();
+extern ), 
+extern ), 
+extern ), 
 
 int a;
 char b;
 
-void main()
+), 
 { a= 5; printint(a );
   myexit();
   b= 7; printint(b);
@@ -583,8 +583,8 @@ cmoc -nodefaultlibs --org=100 --usim --srec  -o fred fred.c -L lib -lc
 then I can have this `fred.c`:
 
 ```
-extern void printint(int x);
-extern void exit(int x);
+extern ), 
+extern ), 
 
 int a;
 char b;
@@ -623,3 +623,70 @@ What I want to do now is to do a full 'Apout' to the user-mode simulator,
 so I can run binaries with argv[] etc. and with no initial breakpoint.
 Then, take a userland like 2.11BSD cmds+lib and build it. I'll use 2.11BSD
 as it's a 16-bit system.
+
+## Fri 12 Aug 2022 11:33:36 AEST
+
+I've started on the simulator with `open()`, `close()`, `read()` and `write()`.
+For now, no rewriting of the pathnames like Apout. And I'll do the argv[] stuff
+later. But it's good.
+
+I had a look at the 2.11BSD libs, and I think I'd prefer to work with the libs
+that I added to `xv6`. Also, I know what syscalls `xv6` has:
+
+```
+chdir(), close(), dup(), exec(), exit(), fork(), fstat(), getpid(), kill(), 
+link(), mkdir(), mknod(), open(), pipe(), read(), sbrk(), sleep(), unlink(), 
+wait(), write(), uptime(), lseek(), ioctl(), time(), fchdir() 
+```
+
+So if I can implement these in `um6809`, then I should be able to port the
+`xv6-freebsd` libs and commands over to this system.
+
+## Sun 14 Aug 2022 10:51:38 AEST
+
+I had a bit of a fight with adding argc, argv[] and envp[] to the system.
+Anyway, I've got it working now. Needed to change the `crt.asm` again, and
+patch `cmoc` to allow envp[].
+
+I've implement most of the above syscalls, the ones that were trivial. Now
+I've got to do things like `exec()`, `pipe()` etc. Not sure how to do `sbrk()`
+at the moment, as I don't think the output format from `lwlink` has details
+of the end of the bss.
+
+## Sun 14 Aug 2022 18:18:28 AEST
+
+I've been trying to port the xv6-freebsd libraries over. It's been painful
+with `cmoc` giving lots of warnings and errors. I'm now looking at Fuzix,
+as there is already a 6809 port of the OS. Now I'm trying to build gcc6809.
+I'm using the information in this Docker file:
+https://github.com/amaiorano/gcc6809-docker/blob/master/Dockerfile
+
+Essentially:
+
+```
+git clone https://gitlab.com/dfffffff/gcc6809.git
+cd gcc6809/build-6809
+sudo make everything
+```
+
+## Mon 15 Aug 2022 12:12:31 AEST
+
+I got `gcc6809` to build and install, and it seems to work OK. I've downloaded
+Fuzix, and I can build the libraries with it which is a start. But, when trying
+to build any of the applications, the linker complains about the format of
+the `abort.o` file, which starts with:
+
+```
+XH2
+H 3 areas 7 global symbols 2 banks 1 modes
+M abort.c
+G 00 00 80 81 82 83 84 85 86 87 88 89 8A 8B 8C 8D 8E 8F
+B _CSEG base 0 size 0 map 0 flags 0
+B _DSEG base 0 size 0 map 0 flags 4 fsfx _DS
+```
+
+I don't recognise that, and `lwlink` (which Fuzix uses as the linker) also
+doesn't recognise it. So, either `gcc` is spitting out the wrong object format,
+or I'm using a version of `lwtools` that doesn't recognise it. I've joined the
+Fuzix Google group and asked about it there. However, the group seems very quiet,
+so I'm not holding my breath on an answer. Sigh.

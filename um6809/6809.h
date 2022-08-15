@@ -86,5 +86,6 @@ extern int load_bin (char *,int);
 
 // oscode.c
 extern void swi2 (void);
+extern void set_arglist(int argc, char **argv);
 
 #endif /* M6809_H */
