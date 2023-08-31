@@ -21,6 +21,8 @@ This memory layout provides each process with nearly 64K of memory, but allows
 the kernel to reside in nearly 32K of ROM. Only the kernel can access the I/O
 devices, because they only get memory-mapped in kernel mode.
 
+![address map table](addressmap.png)
+
 A user process can transition to kernel mode by executing one of the `SWI`
 instructions, but this causes the CPU to jump to a handler for the instruction.
 This will be in the top 32K of memory and, because the SWI causes a kernel
