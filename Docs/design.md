@@ -10,8 +10,9 @@ and the memory & I/O devices. Here are the basics on how it will work.
 ## User/Kernel Mode and Memory Layout
 
 The CPLD implements a user/kernel (unprivileged/privileged) mode bit.
-This is flipped to kernel mode when the 6809's `BS` line goes high.
-In user mode, the whole 64K of address
+This is flipped to kernel mode when the 6809's `BS` line goes high
+(when the 6809 is loading the vector to handle an interrupt or SWI
+instruction). In user mode, the whole 64K of address
 space is RAM except the top 256 bytes at `$FFxx` which is ROM. However, when
 in kernel mode, the top 32K of address space is ROM, except an area for I/O
 devices at `$FExx` and the existing ROM area at `$FFxx`.
