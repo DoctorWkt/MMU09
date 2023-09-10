@@ -1,2 +1,2 @@
 #!/bin/sh
-./6809 ../Monitor/fred.s19 $*; stty sane
+./6809 ../Monitor/monitor.s19 $*; stty sane

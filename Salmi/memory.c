@@ -24,7 +24,6 @@ static int kernelmode = 1;		// Are we in kernel mode?
 
 struct pagetable {			// The page table
   UINT8 *frame;				// Pointer to the mapped frame
-  int invalid;				// If true, page is invalid
   int pteval;				// Real hardware pte value
 } pte[NUMPAGES];				
 
@@ -49,7 +48,6 @@ void init_memory(void) {
   kernelmode = 1;
   for (int i=0; i < NUMPAGES; i++) {
     pte[i].frame= frame[i];
-    pte[i].invalid= 0;
     pte[i].pteval= i;
   }
 }
@@ -120,7 +118,7 @@ UINT8 memory(unsigned addr) {
   val= pte[pagenum].frame[offset];
 
   // If the page is marked invalid, XXX TO FIX
-  if (pte[pagenum].invalid) {
+  if (pte[pagenum].pteval & 0x80) {
     fprintf(stderr, "invalid page read, addr 0x%04x\n", addr);
   }
 
@@ -138,7 +136,7 @@ void set_memory(unsigned addr, UINT8 data) {
 
   // Can't access the top page as it is ROM
   if (addr >= 0xfff0) {
-    fprintf(stderr, "ROM write at 0x%04x in set_memory()\n", addr);
+    fprintf(stderr, "ROM write 1 at 0x%04x in set_memory()\n", addr);
     return;
   }
 
@@ -178,9 +176,8 @@ void set_memory(unsigned addr, UINT8 data) {
 	  pagenum= addr & (NUMPAGES-1);
 	  framenum= data & (NUMFRAMES-1);
 	  pte[pagenum].frame= frame[framenum];
-	  pte[pagenum].invalid= (data & 0x80) ? 1 : 0;
 	  pte[pagenum].pteval= data;
-	  break;
+	  return;
 	default:
 	  fprintf(stderr, "Unknown I/O location write 0x%04x\n", addr);
 	  return;
@@ -189,7 +186,7 @@ void set_memory(unsigned addr, UINT8 data) {
 
     // Top half of memory is ROM
     if (addr >= 0x8000) {
-      fprintf(stderr, "ROM write at 0x%04x in set_memory()\n", addr);
+      fprintf(stderr, "ROM write 2 at 0x%04x in set_memory()\n", addr);
       return;
     }
   }
@@ -204,7 +201,7 @@ void set_memory(unsigned addr, UINT8 data) {
   pte[pagenum].frame[offset]= data;
 
   // If the page is marked invalid, XXX TO FIX
-  if (pte[pagenum].invalid) {
+  if (pte[pagenum].pteval & 0x80) {
     fprintf(stderr, "invalid page write, addr 0x%04x\n", addr);
     return;
   }
