@@ -34,3 +34,8 @@ system. I can run 6809 instructions and see the system go in/out of kernel
 mode, and see the page mappings change.
 
 The CPLD Verilog code now has reset functionality.
+
+## Status - 10th September 2023
+
+I now have a completed PCB design; see the `Hardware` folder for a schematic
+and views of the PC board.

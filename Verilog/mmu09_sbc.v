@@ -32,7 +32,8 @@ module mmu09_sbc (i_qclk, i_eclk, i_reset_n, vadr);
 
   wire romcs_n;				// ROM chip select
   wire ramcs_n;				// RAM chip select
-  wire uartcs_n;			// UART chip select
+  wire uartrd_n;			// UART read enable
+  wire uartwr_n;			// UART write enable
   wire chrd_n;				// CH375 card read
   wire chwr_n;				// CH375 card write
   wire rtccs_n;				// Real-time clock chip select
@@ -51,7 +52,7 @@ module mmu09_sbc (i_qclk, i_eclk, i_reset_n, vadr);
   // the page offset for the physical address
   mmu_decode MMU(i_qclk, i_eclk, i_reset_n, rw, vadr, dataout, bs,
 	uartirq_n, chirq_n, rtcirq_n,
-	romcs_n, ramcs_n, uartcs_n, chrd_n, chwr_n,
+	romcs_n, ramcs_n, uartrd_n, uartwr_n, chrd_n, chwr_n,
 	rtccs_n, frame, pgfault_n, irq_n, firq_n, halt_n);
   assign padr[12:0]= vadr[12:0];
   assign padr[18:13]= frame;
@@ -70,7 +71,7 @@ module mmu09_sbc (i_qclk, i_eclk, i_reset_n, vadr);
   assign datain= (!romcs_n) ? romdata : ramdata;
 
   // The UART device.
-  uart UART(dataout, uartcs_n, rw);
+  uart UART(dataout, uartrd_n, uartwr_n);
 
   // The CPU device
   mc6809e CPU(datain, dataout, vadr, rw, i_eclk, i_qclk, bs, ba, irq_n,

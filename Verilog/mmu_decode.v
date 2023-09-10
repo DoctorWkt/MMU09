@@ -3,7 +3,7 @@
 
 module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
 		  i_uartirq, i_chirq, i_rtcirq,
-		  romcs_n, ramcs_n, uartcs_n, chrd_n, chwr_n,
+		  romcs_n, ramcs_n, uartrd_n, uartwr_n, chrd_n, chwr_n,
 		  rtccs_n, paddr, pgfault_n, irq_n, firq_n, halt_n
 `ifdef TESTING
 		  , ffxx, kernio, kupper, kernel
@@ -24,7 +24,8 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
 
   output romcs_n;		// ROM chip select
   output ramcs_n;		// RAM chip select
-  output uartcs_n;		// UART chip select
+  output uartrd_n;		// UART read enable
+  output uartwr_n;		// UART write enable
   output chrd_n;		// CH375 read enable
   output chwr_n;		// CH375 write enable
   output rtccs_n;		// Real-time clock chip select
@@ -65,15 +66,6 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   assign halt_n= 1'b1;
 
 
-  ////////////////////
-  // RESET HANDLING //
-  ////////////////////
-  always @(negedge i_reset) begin
-    kmodeflag <= 1'b1;
-    faultstate <= 2'b11;
-  end
-
-
   //////////////////////
   // ADDRESS DECODING //
   //////////////////////
@@ -86,12 +78,13 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   // i_kmodeset is connected to the 6809 /BS signal, which
   // goes high when an interrupt is taken.
   // Change to user mode when there is a kernel memory
-  // access in the range $FEF0 to $FEFF.
+  // access in the range $FEE0 to $FEFF.
+  // Also go into kernel mode on a reset.
   always @(posedge i_eclk) begin
-    if (i_kmodeset)
+    if (i_kmodeset || i_reset == 1'b0)
       kmodeflag <= 1'b1;
     if (!i_kmodeset && kernio && i_addr[7:5] == 3'b111)
-      kmodeflag <= 0;
+      kmodeflag <= 1'b0;
   end
 `ifdef TESTING
   assign kernel= kmodeflag;
@@ -119,11 +112,23 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   // Calculate the 3:8 decode of the low address bits
   // for the various active low chip select lines.
   // We can only lower the I/O lines when i_eclk is high
-  // because the data bus isn't valid until then
-  assign rtccs_n=  (i_eclk && kernio && i_addr[7:5] == 3'b001) ? 1'b0 : 1'b1;
-  assign uartcs_n= (i_eclk && kernio && i_addr[7:5] == 3'b000) ? 1'b0 : 1'b1;
-  assign chrd_n=   (i_eclk && kernio && i_addr[7:5] == 3'b010) ? 1'b0 : 1'b1;
-  assign chwr_n=   (i_eclk && kernio && i_addr[7:5] == 3'b011) ? 1'b0 : 1'b1;
+  // because the data bus isn't valid until then.
+  //
+  // The address map for the I/O area is (in 32-byte regions):
+  // $FE00: RTC chip select
+  // $FE20: UART read enable
+  // $FE40: UART write enable
+  // $FE60: CH375 read enable
+  // $FE80: CH375 write enable
+  // $FEA0: unused
+  // $FEC0: eight page table entries
+  // $FEE0: user mode reset
+  //
+  assign rtccs_n=  (i_eclk && kernio && i_addr[7:5] == 3'b000) ? 1'b0 : 1'b1;
+  assign uartrd_n= (i_eclk && kernio && i_addr[7:5] == 3'b001) ? 1'b0 : 1'b1;
+  assign uartwr_n= (i_eclk && kernio && i_addr[7:5] == 3'b010) ? 1'b0 : 1'b1;
+  assign chrd_n=   (i_eclk && kernio && i_addr[7:5] == 3'b011) ? 1'b0 : 1'b1;
+  assign chwr_n=   (i_eclk && kernio && i_addr[7:5] == 3'b100) ? 1'b0 : 1'b1;
 
 
   ///////////////////////
@@ -179,6 +184,8 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
       faultstate <= 2'b01;
     if (faultstate == 2'b01 && kmodeflag) // And set to no fault once we
       faultstate <= 2'b11;		  // reach kernel mode
+    if (i_reset == 1'b0)		  // No fault after a reset
+      faultstate <= 2'b11;
   end
 
 endmodule
@@ -211,8 +218,13 @@ endmodule
 //PIN: i_data_3 : 75
 //PIN: i_data_4 : 76
 //PIN: i_data_5 : 77
+//PIN: i_data_6 : 79
+//PIN: i_data_7 : 80
 //PIN: i_eclk : 83
+//PIN: i_kmodeset : 27
+//PIN: i_qclk : 2
 //PIN: irq_n : 29
+//PIN: i_reset : 1
 //PIN: i_rtcirq : 49
 //PIN: i_rw : 69
 //PIN: i_uartirq : 51
@@ -230,4 +242,5 @@ endmodule
 //PIN: TDI : 14
 //PIN: TDO : 71
 //PIN: TMS : 23
-//PIN: uartcs_n : 56
+//PIN: uartrd_n : 56
+//PIN: uartwr_n : 45

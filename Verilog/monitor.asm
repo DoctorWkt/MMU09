@@ -4,7 +4,7 @@
 
 ; Memory locations for the I/O devices and the page table entries
 ;
-uart		equ $fe00
+uartwr		equ $fe40
 pte0		equ $fec0
 pte1		equ $fec1
 pte2		equ $fec2
@@ -37,13 +37,13 @@ main
 		sta $1234
 		ldb $1234
 
-		stb uart		; Send some output
+		stb uartwr		; Send some output
 		lda #'k'
-		sta uart
+		sta uartwr
 		lda #'t'
-		sta uart
+		sta uartwr
 		lda #linefeed
-		sta uart
+		sta uartwr
 
 		sta umodeswitch		; Now enable user mode
 		nop

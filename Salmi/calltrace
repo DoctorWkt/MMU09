@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Data::Dumper;
+
+my %Symtable;
+
+sub loadmap {
+  my $file= shift;
+  die("No argument to -m\n") if (!defined($file));
+
+  open(my $MAP, "<", $file)
+	|| die("Can't open $file: $!\n");
+  while (<$MAP>) {
+    chomp;
+    last if (m{Symbols of .rodata});
+
+    if (m{0x([0-9a-f]+) (\S+):}) {
+      my $addr= uc($1); my $sym= $2;
+      $Symtable{$addr}= $sym;
+    }
+  }
+  close($MAP);
+  # print Dumper(\%Symtable);
+}
+
+## MAIN PROGRAM ##
+
+while (1) {
+  my $i= shift(@ARGV);
+  if ($i eq "-m") {
+    my $file= shift(@ARGV);
+    loadmap($file);
+  }
+  last if (@ARGV < 2);
+}
+
+die("Usage: $0 [-m mapfile] [-m mapfile ... ] debugfile\n") if (@ARGV != 1);
+
+
+open(my $OUT, "<", $ARGV[0]) || die("Can't open $ARGV[0]: $!\n");
+while (<$OUT>) {
+  chomp;
+  if (m{to ([^ ]*):}) {
+    my $addr= $1;
+    if (defined($Symtable{$addr})) {
+     s{$addr}{$Symtable{$addr} ($addr)};
+    }
+  }
+  print("$_\n");
+}
+exit(0);
