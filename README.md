@@ -39,3 +39,12 @@ The CPLD Verilog code now has reset functionality.
 
 I now have a completed PCB design; see the `Hardware` folder for a schematic
 and views of the PC board.
+
+## Status - 18th September 2023
+
+I have ported the xv6 filesystem code from [https://github.com/DoctorWkt/Nine-E/].
+This gives me a Unix-like environment but with only one program running at a time.
+I've used the address decoding on the MMU09 to give each program 63.5K of address
+space.
+
+I've ordered the PCB and the parts to build the hardware; they haven't arrived yet, sigh.
