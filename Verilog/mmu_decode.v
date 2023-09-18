@@ -74,10 +74,15 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   reg rom_mapped;
   initial rom_mapped = 1'b0;
 
-  // ffxx: active high for $FFxx addresses
+  // ffxx: active high for $FFxx addresses (top 256 ROM bytes)
   wire ffxx;
   assign ffxx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
                i_addr[11] & i_addr[10] & i_addr[9]  & i_addr[8];
+
+  // fexx: active high for $FExx addresses (I/O)
+  wire fexx;
+  assign fexx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
+               i_addr[11] & i_addr[10] & i_addr[9]  & !i_addr[8];
 
   // Map in the I/O area when the 6809 BS signal goes high or
   // when the reset line goes low. Also map out the 32K ROM.
@@ -89,46 +94,42 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
     end
   end
 
-  // This wire is true when we have an $FF00 - $FF7F address
-  // and the I/O area is enabled.
+  // This wire is true when we have an $FExx 
+  // address and the I/O area is enabled.
   wire io_active;
-  assign io_active = ffxx & io_pte_mapped & !i_addr[7];
+  assign io_active = fexx & io_pte_mapped;
 
-  // romcs_n: Active low on addresses $FF80 - $FFFF, or on addresses
+  // romcs_n: Active low on addresses $FFxx, or on addresses
   // $8000 and up when rom_mapped is set and no I/O is active.
-  assign romcs_n= ! ((ffxx & i_addr[7]) | (i_addr[15] & rom_mapped & !io_active));
+  assign romcs_n= ! (ffxx | (i_addr[15] & rom_mapped & !io_active));
 
   // ramcs_n: Active low when neither the ROM or I/O are active.
   assign ramcs_n= !romcs_n | io_active;
 
-  // I/O is mapped into the address range
-  // $FF00 to $FF7F when io_pte_mapped.
-  // Decode some of the low address bits
-  // for the various active low chip select lines.
-  // We can only lower the I/O lines when i_eclk is high
+  // I/O is mapped into the address range $FE00 to $FE7F when io_active.
+  // Decode some of the address bits for the various chip select lines.
+  // We can only lower the select lines when i_eclk is high
   // because the data bus isn't valid until then.
   //
   // The address map for the I/O area is (in 16-byte regions):
-  // $FF00: RTC chip select
-  // $FF10: UART read enable
-  // $FF20: UART write enable
-  // $FF30: CH375 read enable
-  // $FF40: CH375 write enable
-  // $FF50: map in/out the 32K ROM using the low address bit
-  // $FF60: map out the I/O area
-  // $FF70: eight page table entries
+  // $FE00: RTC chip select
+  // $FE10: UART read enable
+  // $FE20: UART write enable
+  // $FE30: CH375 read enable
+  // $FE40: CH375 write enable
+  // $FE50: map in/out the 32K ROM using the low address bit
+  // $FE60: map out the I/O area
+  // $FE70: eight page table entries
 
-  assign rtccs_n=  (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h0) ? 0 : 1;
-  assign uartrd_n= (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h1) ? 0 : 1;
-  assign uartwr_n= (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h2) ? 0 : 1;
-  assign chrd_n=   (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h3) ? 0 : 1;
-  assign chwr_n=   (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h4) ? 0 : 1;
+  assign rtccs_n=  (i_eclk & io_active & i_addr[7:4] == 4'h0) ? 0 : 1;
+  assign uartrd_n= (i_eclk & io_active & i_addr[7:4] == 4'h1) ? 0 : 1;
+  assign uartwr_n= (i_eclk & io_active & i_addr[7:4] == 4'h2) ? 0 : 1;
+  assign chrd_n=   (i_eclk & io_active & i_addr[7:4] == 4'h3) ? 0 : 1;
+  assign chwr_n=   (i_eclk & io_active & i_addr[7:4] == 4'h4) ? 0 : 1;
 
   always @(posedge i_eclk) begin
-    if (ffxx && io_pte_mapped && i_addr[7:4] == 4'h5)
-      rom_mapped <= i_addr[0];
-    if (ffxx && io_pte_mapped && i_addr[7:4] == 4'h6)
-      io_pte_mapped <= 0;
+    if (io_active & i_addr[7:4] == 4'h5) rom_mapped <= i_addr[0];
+    if (io_active & i_addr[7:4] == 4'h6) io_pte_mapped <= 0;
   end
 
 
@@ -156,21 +157,21 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
 
   // Page table entry updates on kernel writes to $FF7x.
   always @(posedge i_eclk)
-    if (ffxx && io_pte_mapped && i_addr[7:4] == 4'h7)
-      pgtable[writeindex] <= i_data;
+    if (io_active & i_addr[7:4] == 4'h7) pgtable[writeindex] <= i_data;
 
 
   /////////////////////////
   // PAGE FAULT HANDLING //
   /////////////////////////
 
-  // A small state machine for page fault handling, so
-  // that we drop the NMI line and raise it soon after.
+  // Send an interrupt when there is an access to an invalid
+  // page in user mode. The top bit of the pte marks "invalid".
+  // We have a small state machine for page fault handling, so
+  // that we drop the interrupt line and raise it soon after.
 
-  // Three states: no page fault (11), a page fault
-  // is signalled before we get to kernel mode (10), 
-  // the page fault signal is disabled before we
-  // get to kernel mode (01).
+  // Three states: no page fault (11), a page fault is signalled before
+  // we get to kernel mode (10),  the page fault signal is disabled before
+  // we get to kernel mode (01). The low bit becomes the interrupt signal.
 
   reg [1:0] faultstate;
   initial faultstate = 2'b11;
@@ -179,11 +180,11 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   always @(posedge i_eclk) begin
 	  				  // Invalid page in user mode:
 					  // signal a page fault.
-    if (faultstate == 2'b11 && pte[7] && !io_pte_mapped)
+    if (faultstate == 2'b11 & pte[7] & !io_pte_mapped)
       faultstate <= 2'b10;
     if (faultstate == 2'b10)		  // Turn it off a clock cycle later
       faultstate <= 2'b01;
-    if (faultstate == 2'b01 && io_pte_mapped) // And set to no fault once we
+    if (faultstate == 2'b01 & io_pte_mapped) // And set to no fault once we
       faultstate <= 2'b11;		  // reach kernel mode
     if (i_reset == 1'b0)		  // No fault after a reset
       faultstate <= 2'b11;

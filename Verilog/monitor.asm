@@ -4,18 +4,18 @@
 
 ; Memory locations for the I/O devices and the page table entries
 ;
-uartwr		equ $ff20
-disablerom	equ $ff51		; Map out the 32K of ROM
-enablerom	equ $ff51		; Map in the 32K of ROM
-disableio	equ $ff60		; Disable the I/O area
-pte0		equ $ff70
-pte1		equ $ff71
-pte2		equ $ff72
-pte3		equ $ff73
-pte4		equ $ff74
-pte5		equ $ff75
-pte6		equ $ff76
-pte7		equ $ff77
+uartwr		equ $fe20
+disablerom	equ $fe51		; Map out the 32K of ROM
+enablerom	equ $fe51		; Map in the 32K of ROM
+disableio	equ $fe60		; Disable the I/O area
+pte0		equ $fe70
+pte1		equ $fe71
+pte2		equ $fe72
+pte3		equ $fe73
+pte4		equ $fe74
+pte5		equ $fe75
+pte6		equ $fe76
+pte7		equ $fe77
 cpuhalt		equ $fff0		; Terminates iverilog simulation
 
 linefeed	equ $0a
