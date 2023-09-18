@@ -4,16 +4,18 @@
 
 ; Memory locations for the I/O devices and the page table entries
 ;
-uartwr		equ $fe40
-pte0		equ $fec0
-pte1		equ $fec1
-pte2		equ $fec2
-pte3		equ $fec3
-pte4		equ $fec4
-pte5		equ $fec5
-pte6		equ $fec6
-pte7		equ $fec7
-umodeswitch	equ $fef0		; Leave kernel mode on a write here
+uartwr		equ $ff20
+disablerom	equ $ff51		; Map out the 32K of ROM
+enablerom	equ $ff51		; Map in the 32K of ROM
+disableio	equ $ff60		; Disable the I/O area
+pte0		equ $ff70
+pte1		equ $ff71
+pte2		equ $ff72
+pte3		equ $ff73
+pte4		equ $ff74
+pte5		equ $ff75
+pte6		equ $ff76
+pte7		equ $ff77
 cpuhalt		equ $fff0		; Terminates iverilog simulation
 
 linefeed	equ $0a
@@ -21,23 +23,22 @@ linefeed	equ $0a
 		org $8000		; Start the ROM at $8000
 		nop
 
-		org $ff00		; ROM code which is always available
+		org $ff80		; ROM code which is always available
 main		
-		lda #$80		; Set up a valid frame for page 0
+		sta enablerom		; Turn on the 32K of ROM
+		lda #$00		; Set up a valid frame for page 0
 		sta pte0
-		lda #$87		; Set up a valid frame for page 7
-		sta pte7		; (to cover ROM when we go to umode)
-		lda #$01		; Set up an invalid frame for page 1
-		sta pte1
-		lda #$82		; Set up an valid frame for page 2
-		sta pte2
-		lds #$5000		; Set the stack well away from page 1
+		lda #$04		; Set up a valid frame for page 4
+		sta pte4		; (to cover ROM when we go to umode)
+		lds #$1000		; Put the stack on page 0
 
-		lda #'w'		; Check RAM read/write on page 0
-		sta $1234
-		ldb $1234
+					; Turn off the I/O area, then do
+					; an SWI to turn it back on
+		sta disableio
+		swi
 
-		stb uartwr		; Send some output
+		lda #'w'		; Send some UART output
+		sta uartwr
 		lda #'k'
 		sta uartwr
 		lda #'t'
@@ -45,37 +46,16 @@ main
 		lda #linefeed
 		sta uartwr
 
-		sta umodeswitch		; Now enable user mode
-		nop
-		nop
-
-		; pshs a		; Push stuff on the stack. This
-		; pshs a		; should cause a page fault.
-		; pshs a
-		
-
-		swi3			; Call the kernel. This should set BS
-		nop			; and cause us to go into kernel mode.
-		nop
-		nop
-		nop
 		sta cpuhalt		; Halt the CPU
-
 swi
-nmi
-		nop
-		nop
-		lda #$81		; Make page 1 valid
-		sta pte1
-		sta umodeswitch		; and return to user mode
 		rti
 		
 		org $fff2		; Interrupt vectors
 		fdb swi			; SWI3
 		fdb swi			; SWI2
-		fdb main		; FIRQ
-		fdb main		; IRQ
+		fdb swi			; FIRQ
+		fdb swi			; IRQ
 		fdb swi			; SWI
-		fdb nmi			; NMI
+		fdb swi			; NMI
 		fdb main		; Reset
 		end

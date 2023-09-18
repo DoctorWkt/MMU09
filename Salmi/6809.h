@@ -89,7 +89,7 @@ extern void randomise_memory(void);
 extern UINT8 memory(unsigned addr);
 extern void set_memory(unsigned addr, UINT8 data);
 extern void set_initial_memory(unsigned addr, UINT8 data);
-void set_kernelmode(void);
+void set_io_active(void);
 
 /* monitor.c */
 extern int monitor_on;

@@ -41,8 +41,8 @@ int cpu_period = 0;
 int cpu_quit = 1;
 int doing_sync=0;		// If 1, doing a SYNC instruction
 
-int romaddr= 0xE000;		// Address from here up are ROM addresses.
-				// Nine-E has 8K of ROM starting here.
+int romaddr= 0x8000;		// Address from here up are ROM addresses.
+				// MMU09 has 32K of ROM starting here.
 
 unsigned *index_regs[4] = { &X, &Y, &U, &S };
 
@@ -753,6 +753,8 @@ void rti (void)
 
   set_cc(newEFI);
   cPC  = read_stack16(S);     S = (S + 2) & 0xffff;
+  if (debugout!=NULL)
+      fprintf(debugout, " RTI to %04X X=%04X D=%04X\n", cPC, get_x(), get_d());
 }
 
 void rts (void)
@@ -783,7 +785,7 @@ void swi (void)
   EFI |= (I_FLAG|F_FLAG);
 
   cPC = (memory(0xfffa) << 8) | memory(0xfffb);
-  void set_kernelmode(void);
+  void set_io_active(void);
 }
 
 void swi2 (void)
@@ -800,7 +802,8 @@ void swi2 (void)
   S = (S - 1) & 0xffff; write_stack(S, get_cc());
 
   cPC = (memory(0xfff4) << 8) | memory(0xfff5);
-  void set_kernelmode(void);
+  printcall(" SWI2");
+  void set_io_active(void);
 }
 
 void swi3 (void)
@@ -817,7 +820,7 @@ void swi3 (void)
   S = (S - 1) & 0xffff; write_stack(S, get_cc());
 
   cPC = (memory(0xfff2) << 8) | memory(0xfff3);
-  void set_kernelmode(void);
+  void set_io_active(void);
 }
 
 void irq (void)
@@ -835,7 +838,7 @@ void irq (void)
   EFI |= (I_FLAG);
 
   cPC = (memory(0xfff8) << 8) | memory(0xfff9);
-  void set_kernelmode(void);
+  void set_io_active(void);
 }
 
 void firq (void)
@@ -846,7 +849,7 @@ void firq (void)
   EFI = F_FLAG|I_FLAG;
 
   cPC = (memory(0xfff6) << 8) | memory(0xfff7);
-  void set_kernelmode(void);
+  void set_io_active(void);
 }
 
 void cwai (void)

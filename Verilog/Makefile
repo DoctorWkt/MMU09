@@ -4,7 +4,7 @@ run: monitor.rom
 
 monitor.rom: monitor.asm
 
-	a09 monitor.asm
+	a09 -l monitor.lst monitor.asm
 	./makerom monitor monitor.rom
 	rm monitor
 
@@ -20,7 +20,11 @@ mmu_decode.jed: mmu_decode.v
 		-tdi_pullup on -tms_pullup on \
 		-output_fast off -xor_synthesis on $*
 
+mmu_decode.svf: mmu_decode.jed
+	jed2svf mmu_decode.jed mmu_decode.svf
+
 clean:
-	rm -rf *.out *.vcd v09.rom monitor monitor.rom \
+	rm -rf *.out *.vcd v09.rom monitor monitor.rom monitor.lst \
 		mmu_decode.edif mmu_decode.fit mmu_decode.io \
-		mmu_decode.jed mmu_decode.pin mmu_decode.tt3 mmu.log
+		mmu_decode.jed mmu_decode.pin mmu_decode.tt3 mmu.log \
+		mmu_decode.svf

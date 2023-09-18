@@ -11,16 +11,20 @@
 // These are mapped to eight 8K pages in user mode, except that
 // the top 256 bytes are mapped to the top of ROM.
 //
-// However, in kernel mode, the top 32K of the address space is
-// ROM, except a 256 byte "window" at $FFEx to map I/O devices.
-// In kernel mode, there are four 8K pages in the bottom 32K.
+// When the I/O area is enabled, the 256 bytes below the top ROM
+// provide access to the I/O devices. This occurs when
+// an SWI instruction occurs, or when the CPU takes an interrupt.
+//
+// When the 32K ROM is enabled, the top 32K of the address space is
+// ROM except for the 256 byte I/O area.
 
 #define PAGESIZE 8192
 #define NUMFRAMES  64
 #define NUMPAGES    8
 
 // Static Variables
-static int kernelmode = 1;		// Are we in kernel mode?
+static int io_active = 1;		// In kernel mode with I/O active?
+static int rom_mapped = 0;		// Is the 32K ROM mapped in?
 
 struct pagetable {			// The page table
   UINT8 *frame;				// Pointer to the mapped frame
@@ -43,9 +47,9 @@ void init_memory(void) {
     memset (frame[i], 0, PAGESIZE);
   }
 
-  // Put us into kernel mode. Point the pages to the
-  // first eight frames. Mark them as valid.
-  kernelmode = 1;
+  // Put us into kernel mode and activate the I/O area.
+  // Point the pages to the first eight frames. Mark them as valid.
+  io_active = 1;
   for (int i=0; i < NUMPAGES; i++) {
     pte[i].frame= frame[i];
     pte[i].pteval= i;
@@ -65,47 +69,46 @@ UINT8 memory(unsigned addr) {
   UINT8 val;
 
   if (addr > 0xffff) {
-    fprintf(stderr, "bad addr %d in memory()\n", addr); exit(1);
+    fprintf(stderr, "bad addr 0x%04x PC 0x%04x in memory()\n",
+	addr, get_pc()); exit(1);
   }
 
-  // Access to the top page always comes from ROM
-  if (addr >= 0xfff0) {
+  // Access to the top 256 bytes always comes from ROM
+  if (addr >= 0xff00) {
     return(ROM[addr & 0x7fff]);
   }
 
-  // Are we in kernel mode?
-  if (kernelmode) {
-    // Is it an I/O access? XXX to fix
-    if (addr >= 0xfe00) {
+  // Is the I/O area active?
+  if (io_active && addr >= 0xfe00) {
       switch (addr) {
-        case 0xfe20:
+        case 0xfe10:
           // Read a character from the keyboard.
           return(kbread());
-        case 0xfe60:
+        case 0xfe30:
           // Read data from the CH375
           return(read_ch375_data());
-        case 0xfec0:
-        case 0xfec1:
-        case 0xfec2:
-        case 0xfec3:
-        case 0xfec4:
-        case 0xfec5:
-        case 0xfec6:
-        case 0xfec7:
+        case 0xfe70:
+        case 0xfe71:
+        case 0xfe72:
+        case 0xfe73:
+        case 0xfe74:
+        case 0xfe75:
+        case 0xfe76:
+        case 0xfe77:
 	  // The real hardware can't read the PTEs but we can!
 	  pagenum= addr & (NUMPAGES-1);
 	  val= pte[pagenum].pteval;
 	  return(val);
 	default:
-	  fprintf(stderr, "Unknown I/O location read 0x%04x\n", addr);
+	  fprintf(stderr, "Unknown I/O location read 0x%04x PC 0x%04x\n",
+	addr, get_pc());
 	  return(0);
       }
-    }
+  }
 
-    // Top half of memory is ROM
-    if (addr >= 0x8000) {
-      return(ROM[addr & 0x7fff]);
-    }
+  // Top half of memory is ROM if the 32K ROM is mapped in
+  if (rom_mapped && addr >= 0x8000) {
+    return(ROM[addr & 0x7fff]);
   }
 
   // We are either in user-mode or accessing
@@ -119,7 +122,7 @@ UINT8 memory(unsigned addr) {
 
   // If the page is marked invalid, XXX TO FIX
   if (pte[pagenum].pteval & 0x80) {
-    fprintf(stderr, "invalid page read, addr 0x%04x\n", addr);
+    fprintf(stderr, "invalid page read, addr 0x%04x PC 0x%04x\n", addr, get_pc());
   }
 
   return(val);
@@ -131,47 +134,56 @@ void set_memory(unsigned addr, UINT8 data) {
   int framenum;
 
   if (addr > 0xffff) {
-    fprintf(stderr, "bad addr %d in set_memory()\n", addr); exit(1);
+    fprintf(stderr, "bad addr 0x%04x PC 0x%04x in set_memory()\n",
+	addr, get_pc()); exit(1);
   }
 
   // Can't access the top page as it is ROM
-  if (addr >= 0xfff0) {
-    fprintf(stderr, "ROM write 1 at 0x%04x in set_memory()\n", addr);
+  if (addr >= 0xff00) {
+    fprintf(stderr, "ROM write 1 at 0x%04x PC 0x%04x in set_memory()\n",
+	addr, get_pc());
     return;
   }
 
-  // Are we in kernel mode?
-  if (kernelmode) {
-    // Is it an I/O access? XXX to fix
-    if (addr >= 0xfe00) {
+  // Is I/O active?
+  if (io_active && addr >= 0xfe00) {
       switch (addr) {
-        case 0xfe40:
+        case 0xfe20:
           // Write a character to the UART, i.e. stdout
           putchar(data);
           fflush(stdout);
           return;
-        case 0xfe80:
+        case 0xfe40:
           // Write a data byte to the CH375.
           // If it returns true, do an FIRQ
           if (recv_ch375_data(data)) firq();
           return;
-        case 0xfe81:
+        case 0xfe41:
           // Write a command byte to the CH375.
           // If it returns true, do an FIRQ
           if (recv_ch375_cmd(data)) firq();
           return;
-        case 0xfee0:
-	  // Go to user mode
-	  kernelmode= 0;
+        case 0xfe50:
+ 	  // Disable the 32K ROM
+	  rom_mapped= 0;
+          return;
+        case 0xfe51:
+ 	  // Enable the 32K ROM
+	  rom_mapped= 1;
+          return;
+        case 0xfe60:
+	  // Go to user mode and map out the I/O area and 32K ROM
+	  io_active= 0;
+	  rom_mapped= 0;
 	  return;
-        case 0xfec0:
-        case 0xfec1:
-        case 0xfec2:
-        case 0xfec3:
-        case 0xfec4:
-        case 0xfec5:
-        case 0xfec6:
-        case 0xfec7:
+        case 0xfe70:
+        case 0xfe71:
+        case 0xfe72:
+        case 0xfe73:
+        case 0xfe74:
+        case 0xfe75:
+        case 0xfe76:
+        case 0xfe77:
 	  // Update a page table entry
 	  pagenum= addr & (NUMPAGES-1);
 	  framenum= data & (NUMFRAMES-1);
@@ -179,16 +191,17 @@ void set_memory(unsigned addr, UINT8 data) {
 	  pte[pagenum].pteval= data;
 	  return;
 	default:
-	  fprintf(stderr, "Unknown I/O location write 0x%04x\n", addr);
+	  fprintf(stderr, "Unknown I/O location write 0x%04x PC 0x%04x\n",
+		addr, get_pc());
 	  return;
       }
-    }
-
-    // Top half of memory is ROM
-    if (addr >= 0x8000) {
-      fprintf(stderr, "ROM write 2 at 0x%04x in set_memory()\n", addr);
-      return;
-    }
+  }
+   
+  // Top half of memory is ROM
+  if (rom_mapped && addr >= 0x8000) {
+    fprintf(stderr, "ROM write 2 at 0x%04x PC 0x%04x SP 0x%04x in set_memory()\n",
+	addr, get_pc(), get_s());
+    return;
   }
 
   // We are either in user-mode or accessing
@@ -202,7 +215,8 @@ void set_memory(unsigned addr, UINT8 data) {
 
   // If the page is marked invalid, XXX TO FIX
   if (pte[pagenum].pteval & 0x80) {
-    fprintf(stderr, "invalid page write, addr 0x%04x\n", addr);
+    fprintf(stderr, "invalid page write, addr 0x%04x PC 0x%04x\n",
+	addr, get_pc());
     return;
   }
 }
@@ -212,7 +226,8 @@ void set_initial_memory(unsigned addr, UINT8 data) {
   int pagenum, offset;
 
   if (addr > 0xffff) {
-    fprintf(stderr, "bad addr %d in set_initial_memory()\n", addr); exit(1);
+    fprintf(stderr, "bad addr 0x%04x PC 0x%04x in set_initial_memory()\n",
+	addr, get_pc()); exit(1);
   }
 
   // Write to ROM if the top half of memory
@@ -226,7 +241,7 @@ void set_initial_memory(unsigned addr, UINT8 data) {
   pte[pagenum].frame[offset]= data;
 }
 
-// Set kernel mode
-void set_kernelmode(void) {
-  kernelmode = 1;
+// Set kernel mode and make the I/O area visible
+void set_io_active(void) {
+  io_active = 1;
 }

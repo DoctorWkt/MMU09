@@ -12,25 +12,33 @@ and the memory & I/O devices. Here are the basics on how it will work.
 The CPLD implements a user/kernel (unprivileged/privileged) mode bit.
 This is flipped to kernel mode when the 6809's `BS` line goes high
 (when the 6809 is loading the vector to handle an interrupt or SWI
-instruction). In user mode, the whole 64K of address
-space is RAM except the top 256 bytes at `$FFxx` which is ROM. However, when
-in kernel mode, the top 32K of address space is ROM, except an area for I/O
-devices at `$FExx` and the existing ROM area at `$FFxx`.
+instruction).
 
-This memory layout provides each process with nearly 64K of memory, but allows
-the kernel to reside in nearly 32K of ROM. Only the kernel can access the I/O
-devices, because they only get memory-mapped in kernel mode.
+In user mode, the whole 64K of address
+space is RAM except the top 256 bytes at `$FF00 - $FFFF` which is ROM.
+
+When in kernel mode, addresses `$FE00 - $FEFF` become an area for
+performing I/O and manipulating the page table entries.
+And, once in kernel mode, one of the I/O locations toggles the mapping of
+nearly 32K more of ROM from addresses `$8000 - $FDFF`.
+
+This memory layout provides each process with nearly 64K of RAM memory and prevents
+processes from doing I/O or changing the page table entries directly. It also allows
+the kernel to reside in nearly 32K of ROM. Only the kernel in ROM can access the I/O
+devices because they only get memory-mapped when in kernel mode.
 
 ![address map table](addressmap.png)
 
 A user process can transition to kernel mode by executing one of the `SWI`
-instructions, but this causes the CPU to jump to a handler for the instruction.
-This will be in the top 32K of memory and, because the SWI causes a kernel
-transition, can only be handled by the operating system in ROM.
+instructions. This causes the CPU to jump to the handler for the relevant instruction
+which is in the top 256 bytes of memory. This also enables the 256 byte I/O area at
+`$FE00 - $FEFF`. This initial SWI handler can then enable the rest of the 32K of
+ROM by tickling the I/O location `$FE50`.
 
-To get from kernel mode back to user mode, one of the I/O memory locations in
-`$FExx` toggles the user/kernel setting back to user mode. Just before the
-operating system `RTI`s back to a process, it will toggle back to user mode.
+To get from kernel mode back to user mode, the operating system jumps up to the top
+256 bytes of ROM. From here, it can hide the 32K ROM by tickling the I/O location `$FE50`
+and hide the I/O area by tickling I/O memory location `$FE60`. Then the operating system
+can return from interrupt and go back to the code running in user mode.
 
 ## The MMU
 
@@ -39,7 +47,7 @@ smaller pages, but I can only implement eight page table entries in the CPLD
 device that I've chosen.
 
 Each page table entry is eight bits. The lower six bits provide the page frame
-number: thus, there are sixty-four 8K frames, which allows the MMU to address
+number: thus, there are sixty-four 8K frames which allows the MMU to address
 512K of RAM. The top bit indicates if the page is "valid". More on this later.
 
 Obviously, one bit in the page table entry is unused. If possible, I'd create
@@ -48,13 +56,13 @@ I could keep 8K pages and this would let the MMU address 1M of RAM.
 
 ## Page Mapping
 
-The MMU only controls RAM mapping. In kernel mode, the ROM is always contiguous
-from `$8000` to `$FFFF` except for the I/O space at `$FExx`. But the RAM from
+The MMU only controls RAM mapping. In kernel mode, the 32K of ROM is always contiguous
+from `$8000` to `$FDFF` except for the I/O space. But the RAM from
 `$0000` to `$7FFF` and, in user mode, the RAM from `$8000` to `$FEFF` gets mapped
 through the MMU.
 
 When the CPU tries to access RAM at an address, the bottom thirteen bits of the
-address act as the offset into the page, and these go directly to the RAM device.
+address act as the offset into the page and these go directly to the RAM device.
 The top three bits go into the MMU and select one of the eight page table entries
 stored there. The low six bits of the entry are combined with the thirteen bits
 of page offset to create a 19-bit physical address which goes to the 512K RAM
@@ -74,14 +82,14 @@ the access, which is picked up by the kernel. So, what use is this?
 Imagine there are three user-mode processes on the system, each with one 8K page
 starting at `$0000` for machine code and data and another 8K page at `$E000` for
 a stack. We have thus allocated six of the sixty-four RAM pages. Let's now set
-aside one more page, page frame 23, mark it as invalid, and map it into the
-address space of all three processes at `$C000`; this will be a guard page below
+aside one more page (e.g. page frame 23), mark it as invalid and map it into the
+address space of all three processes at `$C000`. This will be a *guard page* below
 the three stack pages.
 
 The first process to grow their stack down below `$E000` will cause an NMI. The
 kernel is started up and sees this access. The kernel can now allocate page frame
 23 to the process that performed the access, and mark it as valid. We now choose
-another spare page frame, e.g. frame number 31, mark it as invalid, and map it
+another spare page frame (e.g. frame number 31), mark it as invalid, and map it
 below the stack of all three processes.
 
 So, instead of twenty-four 8K pages to completely fill all three processes'

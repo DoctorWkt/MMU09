@@ -3,7 +3,7 @@ monitor.s19: monitor.asm
 
 monitor.rom: monitor.s19
 	srec_cat monitor.s19 -Motorola -output temp -Binary
-	dd if=temp bs=8192 skip=7 of=monitor.rom
+	dd if=temp bs=32768 skip=1 of=monitor.rom
 	rm -f temp
 
 clean:

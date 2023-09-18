@@ -7,14 +7,28 @@
 ; Non-ROM addresses
 
 ; UART addresses
-uartrd          equ     $fe20           ; UM245R read address
-uartwr          equ     $fe40           ; UM245R write address
+uartrd          equ     $fe10           ; UM245R read address
+uartwr          equ     $fe20           ; UM245R write address
 
 ; Addresses to read & write data and commands to the CH375 device
-chdatard	equ    $fe60
-chdatawr	equ    $fe80
-chcmdrd		equ    $fe60
-chcmdwr		equ    $fe81
+chdatard	equ    	$fe30
+chdatawr	equ    	$fe31
+chcmdrd		equ    	$fe40
+chcmdwr		equ    	$fe41
+
+; Enable/disable 32K ROM
+disablerom	equ    	$fe50
+enablerom	equ    	$fe51
+
+; Page table addresses
+pte0		equ	$fe70
+pte1		equ	$fe71
+pte2		equ	$fe72
+pte3		equ	$fe73
+pte4		equ	$fe74
+pte5		equ	$fe75
+pte6		equ	$fe76
+pte7		equ	$fe77
 
 externswi	equ	$7ffe		; Stores address of SWI handler in RAM
 					; and is preceded by a JMP instruction
@@ -363,7 +377,7 @@ usage		ldx	#usagemsg
 
 ; Message strings
 
-welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.1 $\r\n\r\n"
+welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.4 $\r\n\r\n"
 
 usagemsg	fcc	"DXXXX - dump 16 bytes at $XXXX. If D by itself,\r\n"
 		fcc	"        dump starting past the last dump command\r\n"
@@ -393,6 +407,24 @@ main		lds	#stacktop	; Set up the stack pointer
 		andcc	#$af		; Enable interrupts
 		lda	#$00		; Reset the status flag
 		sta	uartflg
+
+		lda	#$00		; Set up eight page table entries
+		sta	pte0
+		lda	#$01
+		sta	pte1
+		lda	#$02
+		sta	pte2
+		lda	#$03
+		sta	pte3
+		lda	#$04
+		sta	pte4
+		lda	#$05
+		sta	pte5
+		lda	#$06
+		sta	pte6
+		lda	#$07
+		sta	pte7
+
 		lda	#$7E		; Put a 'jmp' instruction
 		sta	externswi-1	; before the address of the
 					; external SWI handler
@@ -545,6 +577,12 @@ alterbytes				; Now get a byte
 		lbeq	prompt
 		jmp	alterbytes
 
+; Pre-main monitor code
+		org	$ff80
+premain
+		sta	enablerom	; Enable the 32K ROM
+		jmp	main
+
 ; Vector table for the interrupt handlers and boot code
 
 		org	$fff6
@@ -552,5 +590,5 @@ alterbytes				; Now get a byte
 		fdb	uartirq
 		fdb	swihandler
 		org	$fffe
-		fdb	main
+		fdb	premain
 		end

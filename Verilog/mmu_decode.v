@@ -1,12 +1,11 @@
 // MMU and address decoding for the MMU09 SBC
 // (c) 2023 Warren Toomey, BSD license
 
-module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
+module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
 		  i_uartirq, i_chirq, i_rtcirq,
 		  romcs_n, ramcs_n, uartrd_n, uartwr_n, chrd_n, chwr_n,
 		  rtccs_n, paddr, pgfault_n, irq_n, firq_n, halt_n
 `ifdef TESTING
-		  , ffxx, kernio, kupper, kernel
 `endif
 		  );
 
@@ -17,7 +16,7 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   input i_rw;			// 6809 R/W signal
   input [15:0] i_addr;		// Input virtual address
   input [7:0] i_data;		// Data bus
-  input i_kmodeset;		// Set kernel mode signal aka the 6809 BS line
+  input i_bs;			// 6809 BS line
   input i_uartirq;		// Interrupt from the UART
   input i_chirq;		// Interrupt from the CH375
   input i_rtcirq;		// Interrupt from the real-time clock
@@ -36,14 +35,7 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   output halt_n;		// Output to the 6809 HALT line
 
 `ifdef TESTING
-  output ffxx;			// True for $FFxx addresses
-  output kernio;		// True in kernel mode for $FExx addresses
-  output kupper;		// True in kernel mode for top 32K addresses
-  output kernel;		// Kernel mode
 `else
-  wire ffxx;
-  wire kernio;
-  wire kupper;
 `endif
 
 
@@ -70,65 +62,74 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   // ADDRESS DECODING //
   //////////////////////
 
-  // Kernel mode bit register: high when in kernel mode
-  reg kmodeflag;
-  initial kmodeflag = 1'b1;
+  // Toggle: when true, map the I/O and page tables into memory.
+  // When false, ROM is mapped at the same location.
+  // Effectively, when true this indicates that we are in kernel mode.
+  reg io_pte_mapped;
+  initial io_pte_mapped = 1'b1;
 
-  // Update the user/kernel mode on either of the two signals.
-  // i_kmodeset is connected to the 6809 /BS signal, which
-  // goes high when an interrupt is taken.
-  // Change to user mode when there is a kernel memory
-  // access in the range $FEE0 to $FEFF.
-  // Also go into kernel mode on a reset.
-  always @(posedge i_eclk) begin
-    if (i_kmodeset || i_reset == 1'b0)
-      kmodeflag <= 1'b1;
-    if (!i_kmodeset && kernio && i_addr[7:5] == 3'b111)
-      kmodeflag <= 1'b0;
-  end
-`ifdef TESTING
-  assign kernel= kmodeflag;
-`endif
+  // Toggle: when true, most of the 32K of ROM is mapped in to memory.
+  // When false, RAM pages are mapped at the same locations.
+  // This can only be toggled when in kernel mode.
+  reg rom_mapped;
+  initial rom_mapped = 1'b0;
 
   // ffxx: active high for $FFxx addresses
+  wire ffxx;
   assign ffxx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
-	       i_addr[11] & i_addr[10] & i_addr[9]  & i_addr[8];
+               i_addr[11] & i_addr[10] & i_addr[9]  & i_addr[8];
 
-  // kupper: active high for high 32K kernel addresses
-  assign kupper= i_addr[15] & kmodeflag;
+  // Map in the I/O area when the 6809 BS signal goes high or
+  // when the reset line goes low. Also map out the 32K ROM.
+  // Thus, go into "kernel mode" on these signals.
+  always @(posedge i_eclk) begin
+    if (i_bs || i_reset == 1'b0) begin
+      io_pte_mapped <= 1'b1;
+      rom_mapped <= 1'b0;
+    end
+  end
 
-  // kernio: $FExx in kernel mode
-  assign kernio= i_addr[14] & i_addr[13] & i_addr[12] & i_addr[11] &
-		 i_addr[10] & i_addr[9]	 & !i_addr[8]  & kupper;
+  // This wire is true when we have an $FF00 - $FF7F address
+  // and the I/O area is enabled.
+  wire io_active;
+  assign io_active = ffxx & io_pte_mapped & !i_addr[7];
 
-  // romcs_n: Active low on $FFxx address, or the top 32K in
-  // kernel mode but not $FExx in kernel mode
-  assign romcs_n= !(ffxx | (kupper & !kernio));
+  // romcs_n: Active low on addresses $FF80 - $FFFF, or on addresses
+  // $8000 and up when rom_mapped is set and no I/O is active.
+  assign romcs_n= ! ((ffxx & i_addr[7]) | (i_addr[15] & rom_mapped & !io_active));
 
-  // ramcs_n: Active low when neither the ROM or I/O are active
-  assign ramcs_n= ffxx | kupper;
+  // ramcs_n: Active low when neither the ROM or I/O are active.
+  assign ramcs_n= !romcs_n | io_active;
 
-  // I/O is mapped into the address range $FE00 to $FEFF only in kernel mode.
-  // Calculate the 3:8 decode of the low address bits
+  // I/O is mapped into the address range
+  // $FF00 to $FF7F when io_pte_mapped.
+  // Decode some of the low address bits
   // for the various active low chip select lines.
   // We can only lower the I/O lines when i_eclk is high
   // because the data bus isn't valid until then.
   //
-  // The address map for the I/O area is (in 32-byte regions):
-  // $FE00: RTC chip select
-  // $FE20: UART read enable
-  // $FE40: UART write enable
-  // $FE60: CH375 read enable
-  // $FE80: CH375 write enable
-  // $FEA0: unused
-  // $FEC0: eight page table entries
-  // $FEE0: user mode reset
-  //
-  assign rtccs_n=  (i_eclk && kernio && i_addr[7:5] == 3'b000) ? 1'b0 : 1'b1;
-  assign uartrd_n= (i_eclk && kernio && i_addr[7:5] == 3'b001) ? 1'b0 : 1'b1;
-  assign uartwr_n= (i_eclk && kernio && i_addr[7:5] == 3'b010) ? 1'b0 : 1'b1;
-  assign chrd_n=   (i_eclk && kernio && i_addr[7:5] == 3'b011) ? 1'b0 : 1'b1;
-  assign chwr_n=   (i_eclk && kernio && i_addr[7:5] == 3'b100) ? 1'b0 : 1'b1;
+  // The address map for the I/O area is (in 16-byte regions):
+  // $FF00: RTC chip select
+  // $FF10: UART read enable
+  // $FF20: UART write enable
+  // $FF30: CH375 read enable
+  // $FF40: CH375 write enable
+  // $FF50: map in/out the 32K ROM using the low address bit
+  // $FF60: map out the I/O area
+  // $FF70: eight page table entries
+
+  assign rtccs_n=  (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h0) ? 0 : 1;
+  assign uartrd_n= (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h1) ? 0 : 1;
+  assign uartwr_n= (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h2) ? 0 : 1;
+  assign chrd_n=   (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h3) ? 0 : 1;
+  assign chwr_n=   (i_eclk && ffxx && io_pte_mapped && i_addr[7:4] == 4'h4) ? 0 : 1;
+
+  always @(posedge i_eclk) begin
+    if (ffxx && io_pte_mapped && i_addr[7:4] == 4'h5)
+      rom_mapped <= i_addr[0];
+    if (ffxx && io_pte_mapped && i_addr[7:4] == 4'h6)
+      io_pte_mapped <= 0;
+  end
 
 
   ///////////////////////
@@ -136,26 +137,26 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   ///////////////////////
 
   reg [7:0] pgtable[0:7];	// The page table. Low six bits are
-				// the frame number. Top bit indicates
-				// that the page is invalid
+				// the frame number. Top bit set
+				// indicates that the page is invalid.
 
-  // Get the address lines that index into the page table
+  // Get the address lines that index into the page table.
   wire [2:0] pgindex= i_addr[15:13];
 
   // When we are writing to the page table entries,
-  // we use the low address bits so we get indices 0 .. 7
+  // we use the low address bits so we get indices 0 .. 7.
   wire [2:0] writeindex= i_addr[2:0];
 
-  // Page table entry found by indexing the page table
+  // Page table entry found by indexing the page table.
   wire [7:0] pte;
 
   // Page mapping. Six bits become the frame number.
   assign pte= pgtable[pgindex];
   assign paddr= pte[5:0];
 
-  // Page table entry updates on kernel writes to $FECx
+  // Page table entry updates on kernel writes to $FF7x.
   always @(posedge i_eclk)
-    if (kernio && !i_rw && i_addr[7:5] == 3'b110)
+    if (ffxx && io_pte_mapped && i_addr[7:4] == 4'h7)
       pgtable[writeindex] <= i_data;
 
 
@@ -178,11 +179,11 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_kmodeset,
   always @(posedge i_eclk) begin
 	  				  // Invalid page in user mode:
 					  // signal a page fault.
-    if (faultstate == 2'b11 && !pte[7] && !kmodeflag)
+    if (faultstate == 2'b11 && pte[7] && !io_pte_mapped)
       faultstate <= 2'b10;
     if (faultstate == 2'b10)		  // Turn it off a clock cycle later
       faultstate <= 2'b01;
-    if (faultstate == 2'b01 && kmodeflag) // And set to no fault once we
+    if (faultstate == 2'b01 && io_pte_mapped) // And set to no fault once we
       faultstate <= 2'b11;		  // reach kernel mode
     if (i_reset == 1'b0)		  // No fault after a reset
       faultstate <= 2'b11;
@@ -221,7 +222,7 @@ endmodule
 //PIN: i_data_6 : 79
 //PIN: i_data_7 : 80
 //PIN: i_eclk : 83
-//PIN: i_kmodeset : 27
+//PIN: i_bs : 27
 //PIN: i_qclk : 2
 //PIN: irq_n : 29
 //PIN: i_reset : 1
