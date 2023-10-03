@@ -9,11 +9,15 @@
 `include "rom.v"
 `include "uart.v"
 
-module mmu09_sbc (i_qclk, i_eclk, i_reset_n, vadr);
+module mmu09_sbc (i_qclk, i_eclk, i_reset_n,
+		  i_irq_n, i_firq_n, i_nmi_n, vadr);
 
   input i_qclk;				// Q clock
   input i_eclk;				// E clock
   input i_reset_n;			// Reset line
+  input i_irq_n;			// IRQ line
+  input i_firq_n;			// FIRQ line
+  input i_nmi_n;			// NMI line
   output [15:0] vadr;			// Address bus value
 
   // Internal signals
@@ -22,13 +26,16 @@ module mmu09_sbc (i_qclk, i_eclk, i_reset_n, vadr);
   wire rw;				// Read/write line
   wire bs;				// BS line
   wire ba;				// BA line
-  wire irq_n;				// IRQ line
-  wire firq_n;				// FIRQ line
-  wire nmi_n;				// NMI line
   wire avma;				// AVMA line
   wire busy;				// BUSY line
   wire lic;				// LIC line
   wire halt_n;				// HALT line
+
+  // These wires temporarily unused so that
+  // we can send interrupts from the testbed
+  wire irq_n;
+  wire firq_n;
+  wire nmi_n;
 
   wire romcs_n;				// ROM chip select
   wire ramcs_n;				// RAM chip select
@@ -74,8 +81,8 @@ module mmu09_sbc (i_qclk, i_eclk, i_reset_n, vadr);
   uart UART(dataout, uartrd_n, uartwr_n);
 
   // The CPU device
-  mc6809e CPU(datain, dataout, vadr, rw, i_eclk, i_qclk, bs, ba, irq_n,
-	      firq_n, nmi_n, avma, busy, lic, halt_n, i_reset_n);
+  mc6809e CPU(datain, dataout, vadr, rw, i_eclk, i_qclk, bs, ba, i_irq_n,
+	      i_firq_n, i_nmi_n, avma, busy, lic, halt_n, i_reset_n);
 
   // Get an NMI on a pagefault. Don't do IRQ or FIRQ for now.
   assign nmi_n= pgfault_n;

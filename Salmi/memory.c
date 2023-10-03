@@ -23,8 +23,9 @@
 #define NUMPAGES    8
 
 // Static Variables
-static int io_active = 1;		// In kernel mode with I/O active?
-static int rom_mapped = 0;		// Is the 32K ROM mapped in?
+static int io_active[4];		// In kernel mode with I/O active?
+static int rom_mapped[4];		// Is the 32K ROM mapped in?
+static int io_idx= 0;			// Index into these arrays
 
 struct pagetable {			// The page table
   UINT8 *frame;				// Pointer to the mapped frame
@@ -47,9 +48,11 @@ void init_memory(void) {
     memset (frame[i], 0, PAGESIZE);
   }
 
-  // Put us into kernel mode and activate the I/O area.
+  // Put us into kernel mode and activate the I/O area and 32K ROM.
   // Point the pages to the first eight frames. Mark them as valid.
-  io_active = 1;
+  io_active[0] = 1;
+  rom_mapped[0] = 1;
+  io_idx = 0;
   for (int i=0; i < NUMPAGES; i++) {
     pte[i].frame= frame[i];
     pte[i].pteval= i;
@@ -73,13 +76,13 @@ UINT8 memory(unsigned addr) {
 	addr, get_pc()); exit(1);
   }
 
-  // Access to the top 256 bytes always comes from ROM
+  // Access to the top 256 bytes always comes from ROM.
   if (addr >= 0xff00) {
     return(ROM[addr & 0x7fff]);
   }
 
   // Is the I/O area active?
-  if (io_active && addr >= 0xfe00) {
+  if (io_active[io_idx] && addr >= 0xfe00) {
       switch (addr) {
         case 0xfe10:
           // Read a character from the keyboard.
@@ -107,7 +110,7 @@ UINT8 memory(unsigned addr) {
   }
 
   // Top half of memory is ROM if the 32K ROM is mapped in
-  if (rom_mapped && addr >= 0x8000) {
+  if (rom_mapped[io_idx] && addr >= 0x8000) {
     return(ROM[addr & 0x7fff]);
   }
 
@@ -138,7 +141,7 @@ void set_memory(unsigned addr, UINT8 data) {
 	addr, get_pc()); exit(1);
   }
 
-  // Can't access the top page as it is ROM
+  // Can't access the top 256 bytes as it is ROM.
   if (addr >= 0xff00) {
     fprintf(stderr, "ROM write 1 at 0x%04x PC 0x%04x in set_memory()\n",
 	addr, get_pc());
@@ -146,7 +149,7 @@ void set_memory(unsigned addr, UINT8 data) {
   }
 
   // Is I/O active?
-  if (io_active && addr >= 0xfe00) {
+  if (io_active[io_idx] && addr >= 0xfe00) {
       switch (addr) {
         case 0xfe20:
           // Write a character to the UART, i.e. stdout
@@ -165,16 +168,18 @@ void set_memory(unsigned addr, UINT8 data) {
           return;
         case 0xfe50:
  	  // Disable the 32K ROM
-	  rom_mapped= 0;
+// printf("rom unmapped\n");
+	  rom_mapped[io_idx]= 0;
           return;
         case 0xfe51:
  	  // Enable the 32K ROM
-	  rom_mapped= 1;
+// printf("rom mapped\n");
+	  rom_mapped[io_idx]= 1;
           return;
         case 0xfe60:
+// printf("I/O disabled\n");
 	  // Go to user mode and map out the I/O area and 32K ROM
-	  io_active= 0;
-	  rom_mapped= 0;
+	  io_active[io_idx]= 0;
 	  return;
         case 0xfe70:
         case 0xfe71:
@@ -190,6 +195,13 @@ void set_memory(unsigned addr, UINT8 data) {
 	  pte[pagenum].frame= frame[framenum];
 	  pte[pagenum].pteval= data;
 	  return;
+        case 0xfe80:
+	  // Drop back to a previous I/O and 32K ROM mapping
+	  io_idx--;
+  	  if (io_idx<0) {
+    	    fprintf(stderr, "Too many unstacked interrupts!\n"); exit(1);
+  	  }
+	  return;
 	default:
 	  fprintf(stderr, "Unknown I/O location write 0x%04x PC 0x%04x\n",
 		addr, get_pc());
@@ -198,7 +210,7 @@ void set_memory(unsigned addr, UINT8 data) {
   }
    
   // Top half of memory is ROM
-  if (rom_mapped && addr >= 0x8000) {
+  if (rom_mapped[io_idx] && addr >= 0x8000) {
     fprintf(stderr, "ROM write 2 at 0x%04x PC 0x%04x SP 0x%04x in set_memory()\n",
 	addr, get_pc(), get_s());
     return;
@@ -243,5 +255,12 @@ void set_initial_memory(unsigned addr, UINT8 data) {
 
 // Set kernel mode and make the I/O area visible
 void set_io_active(void) {
-  io_active = 1;
+//printf("Both I/O and ROM mapped\n");
+  // Move up to the next position, so we remember the previous settings
+  io_idx++;
+  if (io_idx==4) {
+    fprintf(stderr, "Too many stacked interrupts!\n"); exit(1);
+  }
+  io_active[io_idx] = 1;
+  rom_mapped[io_idx]= 1;
 }

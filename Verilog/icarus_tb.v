@@ -13,19 +13,33 @@ module icarus_tb();
   reg qclk= 0;				// 6809 Q clock
   reg eclk= 0;				// 6809 E clock
   reg reset_n= 0;			// Reset line, active low
+  reg irq_n= 1;
+  reg firq_n= 1;
+  reg nmi_n= 1;
   reg [3:0] counter=0;			// Used to raise reset_n eventually
+  reg [31:0] intctr=0;			// Counter used to send interrupts
   wire [15:0] vadr;			// 6809 address bus
+
 
   // Initialize all variables
   initial begin        
     $dumpfile("test.vcd");
     $dumpvars(0, icarus_tb);
-    #200000 $finish;      		// Terminate simulation
+    #2000000 $finish;      		// Terminate simulation
   end
 
   // Clock generator
   always begin
     #HalfClock clk = ~clk; // Toggle clk every HalfClock to make a full cycle
+  end
+
+  // We have a counter so that we can send interrupts at certain times
+  always @(posedge eclk) begin
+    intctr = intctr + 1;
+    if (intctr == 32'h000001c4)
+      nmi_n = 1'b0;
+    if (intctr == 32'h000001c5)
+      nmi_n = 1'b1;
   end
   
   // Generate the Q and E clock signals
@@ -52,6 +66,6 @@ module icarus_tb();
   end
 
   // Connect DUT to test bench
-  mmu09_sbc dut(qclk, eclk, reset_n, vadr);
+  mmu09_sbc dut(qclk, eclk, reset_n, irq_n, firq_n, nmi_n, vadr);
 
 endmodule

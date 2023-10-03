@@ -1,9 +1,3 @@
-; This is a simple monitor for the MMU09 SBC.
-; For usage details, search for "welcomemsg"
-; in this file!
-;
-; (c) 2023 Warren Toomey, GPL3.
-
 ; Non-ROM addresses
 
 ; UART addresses
@@ -11,16 +5,18 @@ uartrd          equ     $fe10           ; UM245R read address
 uartwr          equ     $fe20           ; UM245R write address
 
 ; Addresses to read & write data and commands to the CH375 device
-chdatard	equ    	$fe30
-chdatawr	equ    	$fe31
-chcmdrd		equ    	$fe40
-chcmdwr		equ    	$fe41
+chdatard	equ    $fe30
+chdatawr	equ    $fe40
+chcmdrd		equ    $fe31
+chcmdwr		equ    $fe41
 
-; Enable/disable 32K ROM
-disablerom	equ    	$fe50
-enablerom	equ    	$fe51
+; Addresses to enable/disable the 32K ROM
+; and to disable the I/O area at $FExx
+disablerom	equ	$fe50
+enablerom	equ	$fe51
+disableio	equ	$fe60
 
-; Page table addresses
+; Page table entries
 pte0		equ	$fe70
 pte1		equ	$fe71
 pte2		equ	$fe72
@@ -30,10 +26,7 @@ pte5		equ	$fe75
 pte6		equ	$fe76
 pte7		equ	$fe77
 
-externswi	equ	$7ffe		; Stores address of SWI handler in RAM
-					; and is preceded by a JMP instruction
-
-stacktop	equ	$7f70		; Top of stack, set by this monitor
+stacktop	equ	$7770		; Top of stack, set by this monitor
 
 ; CH375 commands
 CMD_RESET_ALL           equ 0x05
@@ -56,7 +49,7 @@ USB_INT_DISK_READ       equ 0x1D
 USB_INT_DISK_WRITE      equ 0x1E
 
 ; Variables
-		org	$7f80
+		org	$7780
 
 chstatus	fcb	#$00		; CH375 status after an FIRQ
 uartflg		fcb	#$00		; Flag indicating if there's a character in uartch, initially false
@@ -65,8 +58,12 @@ dumpaddr	fdb	#$ff00		; Start address for memory dumping
 temp1		fcb	#$00		; Temp variable
 temp2		fcb	#$00		; Temp variable
 
-; ROM code
+; ROM starts at $8000 as it is a 32K part
 		org	$8000
+		nop
+
+; ROM code
+		org	$e000
 
 ; Get a character from the UART in A
 getc		lda	uartflg		; See if there is any UART data to read
@@ -117,25 +114,25 @@ ch375firq	pshs	a
 swihandler	cmpx	#17		; Syscall 17 is putchar()
 		bne	1f
 		jsr	putc
-		jmp	swiend
+		jmp	swidone
 1		cmpx	#23		; Syscall 23 is getchar()
 		bne	2f
 		jsr	getc
-		jmp	swiend
+		jmp	swidone
 2		cmpx	#1		; Syscall 1 is exit()
 		bne	3f
 		jmp	main		; Restart monitor on exit()
 3		cmpx	#69		; Syscall 69 is sbrk()
 		bne	4f
-		jmp	swiend		; Do nothing for sbrk()
+		jmp	swidone		; Do nothing for sbrk()
 4		cmpx	#18		; Syscall 18 is printint() but in hex
 		bne	5f
 		jsr	prhex		; Print A then B
 		tfr	b,a
 		jsr	prhex
-		jmp	swiend
-5		jmp	externswi-1
-swiend		rti
+		jmp	swidone
+5
+swidone		jmp	swiend		; Go to top 256 bytes of ROM
 
 ; Print out the NUL-terminated string which X points at
 ;
@@ -377,7 +374,7 @@ usage		ldx	#usagemsg
 
 ; Message strings
 
-welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.4 $\r\n\r\n"
+welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.25 $\r\n\r\n"
 
 usagemsg	fcc	"DXXXX - dump 16 bytes at $XXXX. If D by itself,\r\n"
 		fcc	"        dump starting past the last dump command\r\n"
@@ -408,8 +405,8 @@ main		lds	#stacktop	; Set up the stack pointer
 		lda	#$00		; Reset the status flag
 		sta	uartflg
 
-		lda	#$00		; Set up eight page table entries
-		sta	pte0
+		lda	#$00		; Set up 64K of RAM
+		sta	pte0		; in the page tables
 		lda	#$01
 		sta	pte1
 		lda	#$02
@@ -424,10 +421,6 @@ main		lds	#stacktop	; Set up the stack pointer
 		sta	pte6
 		lda	#$07
 		sta	pte7
-
-		lda	#$7E		; Put a 'jmp' instruction
-		sta	externswi-1	; before the address of the
-					; external SWI handler
 
 		ldx	#welcomemsg	; Print out the welcome message and the usage message
 		jsr	puts
@@ -474,7 +467,7 @@ dump
 		jsr	puts
 		ldx	dumpaddr
 		ldb	#$00		; Start with B at zero
-3		lda	,x+		; Get a byte to dump
+3		jsr	getbyte		; Get a byte to dump
 		jsr	prhex		; Print it in hex
 		lda	#$20		; followed by a space
 		jsr	putc
@@ -497,8 +490,10 @@ go
 1		jsr	getputc		; Loop getting
 		cmpa	#$0a		; characters until EOLN
 		bne	1b
-2		jsr	[dumpaddr]	; Call subroutine at the dump address
+2		jmp	runprog		; Call subroutine at the dump address
 
+					; XXX We never get to here! XXX
+					; Leftover code from before.
 		ldx	#crlfmsg	; Move to the next line
 		jsr	puts
 		jmp	prompt		; and prompt for next command
@@ -570,17 +565,47 @@ alterbytes				; Now get a byte
 		lbeq	unknown2
 		jsr	cnvhex		; Convert into binary
 		ldx	dumpaddr	; Put the byte at the dump address
-		sta	,x+
+		jsr	putbyte
 		stx	dumpaddr	; and update the address
 		jsr	getputc		; Get the character after the byte
 		cmpa	#$0a		; If newline, end of alter
 		lbeq	prompt
 		jmp	alterbytes
 
-; Pre-main monitor code
-		org	$ff80
+; Top 256 bytes of ROM. This part of ROM can never get mapped out.
+		org	$ff00
+
+; Get the byte that X points at into A, and increment A.
+; Disable/enable the 32K ROM at the same time
+getbyte	
+		sta	disablerom
+		lda     ,x+
+		sta	enablerom
+		rts
+
+; Put byte in A to the address that X points at, and increment A.
+; Disable/enable the 32K ROM at the same time
+putbyte
+		sta	disablerom
+		sta     ,x+
+		sta	enablerom
+		rts
+; Disable the 32K ROM and the I/O area, and start the program at
+; the dump address. They will have to do an exit syscall to get
+; back to the monitor.
+
+runprog
+		sta	disablerom
+		sta	disableio
+		jmp	[dumpaddr]	; Call subroutine at the dump address
+
+swiend					; Go back to user mode
+		sta	disablerom
+		sta	disableio
+		rti
+
 premain
-		sta	enablerom	; Enable the 32K ROM
+		sta	enablerom
 		jmp	main
 
 ; Vector table for the interrupt handlers and boot code

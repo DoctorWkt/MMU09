@@ -11,16 +11,15 @@ and the memory & I/O devices. Here are the basics on how it will work.
 
 The CPLD implements a user/kernel (unprivileged/privileged) mode bit.
 This is flipped to kernel mode when the 6809's `BS` line goes high
-(when the 6809 is loading the vector to handle an interrupt or SWI
+(when the 6809 is loading the vector to handle a reset, an interrupt or SWI
 instruction).
 
 In user mode, the whole 64K of address
 space is RAM except the top 256 bytes at `$FF00 - $FFFF` which is ROM.
 
 When in kernel mode, addresses `$FE00 - $FEFF` become an area for
-performing I/O and manipulating the page table entries.
-And, once in kernel mode, one of the I/O locations toggles the mapping of
-nearly 32K more of ROM from addresses `$8000 - $FDFF`.
+performing I/O and manipulating the page table entries. And nearly
+32K of ROM gets mapped in from addresses `$8000 - $FDFF`.
 
 This memory layout provides each process with nearly 64K of RAM memory and prevents
 processes from doing I/O or changing the page table entries directly. It also allows
@@ -31,14 +30,40 @@ devices because they only get memory-mapped when in kernel mode.
 
 A user process can transition to kernel mode by executing one of the `SWI`
 instructions. This causes the CPU to jump to the handler for the relevant instruction
-which is in the top 256 bytes of memory. This also enables the 256 byte I/O area at
-`$FE00 - $FEFF`. This initial SWI handler can then enable the rest of the 32K of
-ROM by tickling the I/O location `$FE50`.
+which is in the top 256 bytes of memory. This enables the 256 byte I/O area at
+`$FE00 - $FEFF` and the 32K of ROM at `$8000 - $FDFF`.
 
 To get from kernel mode back to user mode, the operating system jumps up to the top
-256 bytes of ROM. From here, it can hide the 32K ROM by tickling the I/O location `$FE50`
-and hide the I/O area by tickling I/O memory location `$FE60`. Then the operating system
-can return from interrupt and go back to the code running in user mode.
+256 bytes of ROM. From here, it can hide the I/O area and 32K ROM by tickling I/O memory
+location `$FE60`. Then the operating system can return from interrupt and go back to the code
+running in user mode.
+
+## Hiding the 32K ROM
+
+It's useful to be able to hide the 32K of ROM when we are kernel mode. For example,
+perhaps the user program wants to write data out to the storage device, but the
+program has this data in a buffer starting at `$C000`. With the 32K ROM mapped in,
+this data is hidden.
+
+In the I/O area, tickling address `$FE50` maps out the 32K of ROM and tickling address
+`$FE51` maps the 32K of ROM back in. To use this effectively, there will be a modified
+`memcpy()` routine in the top 256 bytes of RAM (always visible) that maps the 32K ROM out,
+does the data copy with the user data, and maps the 32K ROM back in.
+
+## Stacking User/Kernel Modes
+
+One problem is that, when an interrupt routine is exiting, it doesn't know if to go back to
+user mode or to stay in kernel mode. An example is the UART interrupt handler which is started
+when a character arrives from the keyboard. Before the interrupt handler started, we might
+be in user mode running the user process. Or, we might be in kernel mode handling a system call
+like `read()`.
+
+To solve this problem, the CPLD keeps track of the last four user/kernel mode states. Just before
+an interrupt handler returns (with the `RTI` instruction), it can tickle the I/O address `$FE80`.
+This tells the CPLD to go back to the previous mode, be it kernel mode or user mode.
+
+Thus, we can stack a user mode, a system call and two nested interrupts and return back from
+each one safely.
 
 ## The MMU
 

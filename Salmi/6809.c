@@ -768,8 +768,6 @@ void rts (void)
 // Variables for the system calls
 int curbrk=0;			// Current break value
 
-// SWI code. We implement some system calls by looking at the value in
-// the X register.
 void swi (void)
 {
   cpu_clk -= 19;
@@ -785,7 +783,7 @@ void swi (void)
   EFI |= (I_FLAG|F_FLAG);
 
   cPC = (memory(0xfffa) << 8) | memory(0xfffb);
-  void set_io_active(void);
+  set_io_active();
 }
 
 void swi2 (void)
@@ -803,7 +801,7 @@ void swi2 (void)
 
   cPC = (memory(0xfff4) << 8) | memory(0xfff5);
   printcall(" SWI2");
-  void set_io_active(void);
+  set_io_active();
 }
 
 void swi3 (void)
@@ -820,7 +818,7 @@ void swi3 (void)
   S = (S - 1) & 0xffff; write_stack(S, get_cc());
 
   cPC = (memory(0xfff2) << 8) | memory(0xfff3);
-  void set_io_active(void);
+  set_io_active();
 }
 
 void irq (void)
@@ -838,7 +836,7 @@ void irq (void)
   EFI |= (I_FLAG);
 
   cPC = (memory(0xfff8) << 8) | memory(0xfff9);
-  void set_io_active(void);
+  set_io_active();
 }
 
 void firq (void)
@@ -849,7 +847,7 @@ void firq (void)
   EFI = F_FLAG|I_FLAG;
 
   cPC = (memory(0xfff6) << 8) | memory(0xfff7);
-  void set_io_active(void);
+  set_io_active();
 }
 
 void cwai (void)

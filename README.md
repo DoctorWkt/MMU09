@@ -45,6 +45,25 @@ and views of the PC board.
 I have ported the xv6 filesystem code from [https://github.com/DoctorWkt/Nine-E/].
 This gives me a Unix-like environment but with only one program running at a time.
 I've used the address decoding on the MMU09 to give each program 63.5K of address
-space.
+space. This works in the Salmi simulator.
 
 I've ordered the PCB and the parts to build the hardware; they haven't arrived yet, sigh.
+
+## Status - 4th October 2023
+
+I've built the board and, with the exception of the DS12C887, everything
+works at 14.75MHz. I've changed the CPLD code to have a stack of four
+previous user/kernel modes; this allows us to go from user mode to kernel
+mode, followed by two nested interrupts, and return safely back to user mode.
+
+Programming the CPLD with the Verilog -> Yosys -> JED workflow is nice and
+easy, using the workflow from [https://github.com/hoglet67/atf15xx_yosys].
+I'm then using the `jed2svf` converter from
+[https://whitequark.github.io/prjbureau/tools/fuseconv.html] to make the
+SVF file, and a FT232H device and OpenOCD to send the SVF file to the ATF1508 CPLD,
+based on the information from
+[https://www.hackup.net/2020/01/erasing-and-programming-the-atf1504-cpld/].
+
+I have a simple monitor which allows me to dump memory contents,
+alter memory and run a program in user mode. There are syscalls to read from
+& write to the UART, and to exit back to the monitor.

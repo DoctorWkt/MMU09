@@ -1,5 +1,10 @@
 // MMU and address decoding for the MMU09 SBC
 // (c) 2023 Warren Toomey, BSD license
+// $Revision: 1.42 $
+
+// This version puts 256 of ROM at $FFxx, the I/O area at $FExx
+// and the rest of the ROM from $8000 up to $FDFF. There is a
+// toggle for the nearly 32K of ROM from $8000 up to $FDFF.
 
 module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
 		  i_uartirq, i_chirq, i_rtcirq,
@@ -20,6 +25,7 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   input i_uartirq;		// Interrupt from the UART
   input i_chirq;		// Interrupt from the CH375
   input i_rtcirq;		// Interrupt from the real-time clock
+  input rtccs_n;		// Real-time clock chip select
 
   output romcs_n;		// ROM chip select
   output ramcs_n;		// RAM chip select
@@ -27,52 +33,54 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   output uartwr_n;		// UART write enable
   output chrd_n;		// CH375 read enable
   output chwr_n;		// CH375 write enable
-  output rtccs_n;		// Real-time clock chip select
   output [18:13] paddr;		// Frame number for the input virtual address
   output pgfault_n;		// Active if page table entry is invalid
-  output irq_n;			// Interrupt from either UART or CH375
+  output irq_n;			// Normal interrupt to the 6809
   output firq_n;		// Fast interrupt to the 6809
   output halt_n;		// Output to the 6809 HALT line
-
-`ifdef TESTING
-`else
-`endif
-
 
   ////////////////////////////
   // INTERRUPT MULTIPLEXING //
   ////////////////////////////
 
-  // Send an IRQ when either the UART or the CH375 sends an interrupt
-  assign irq_n= i_uartirq & i_chirq;
-
-  // Pass through the real-time clock interrupt to the FIRQ output
-  assign firq_n= i_rtcirq;
-
+  assign irq_n= i_uartirq;
+  assign firq_n= 1'b1;		// For now until we use the CH375
 
   ////////////////
   // HALT LOGIC //
   ////////////////
 
-  // For now, nothing. But we have the output line for later :-)
-  assign halt_n= 1'b1;
-
+  assign halt_n= 1'b1;		// No halts just yet :-)
 
   //////////////////////
   // ADDRESS DECODING //
   //////////////////////
 
-  // Toggle: when true, map the I/O and page tables into memory.
-  // When false, ROM is mapped at the same location.
-  // Effectively, when true this indicates that we are in kernel mode.
-  reg io_pte_mapped;
-  initial io_pte_mapped = 1'b1;
+  // We have two toggles: one for the I/O area called io_pte_mapped
+  // and one for the 32K ROM area called rom_mapped. We keep a
+  // stack of these so that we can go back to the previous states
+  // for both of them.
 
-  // Toggle: when true, most of the 32K of ROM is mapped in to memory.
-  // When false, RAM pages are mapped at the same locations.
-  // This can only be toggled when in kernel mode.
-  reg rom_mapped;
-  initial rom_mapped = 1'b0;
+  // io_pte_mapped: when true, map the I/O and page tables into memory
+  // at $FExx. When false, RAM is mapped at the same location.
+  // Effectively, when true this indicates that we are in kernel mode.
+  reg io_pte_mapped[0:3];
+  initial io_pte_mapped[0] = 1'b1;
+
+  // rom_mapped: when true, most of the 32K of ROM is mapped in to memory
+  // from $8000 up. When false, RAM pages are mapped at the same locations.
+  reg rom_mapped[0:3];
+  initial rom_mapped[0] = 1'b1;
+
+  // io_idx is the index to the above two arrays.
+  reg [1:0] io_idx;
+  initial io_idx = 2'b00;
+
+  // Wires that point at the current toggle values
+  wire mapped_io;
+  wire mapped_rom;
+  assign mapped_io  = io_pte_mapped[io_idx];
+  assign mapped_rom = rom_mapped[io_idx];
 
   // ffxx: active high for $FFxx addresses (top 256 ROM bytes)
   wire ffxx;
@@ -84,24 +92,14 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   assign fexx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
                i_addr[11] & i_addr[10] & i_addr[9]  & !i_addr[8];
 
-  // Map in the I/O area when the 6809 BS signal goes high or
-  // when the reset line goes low. Also map out the 32K ROM.
-  // Thus, go into "kernel mode" on these signals.
-  always @(posedge i_eclk) begin
-    if (i_bs || i_reset == 1'b0) begin
-      io_pte_mapped <= 1'b1;
-      rom_mapped <= 1'b0;
-    end
-  end
-
   // This wire is true when we have an $FExx 
   // address and the I/O area is enabled.
   wire io_active;
-  assign io_active = fexx & io_pte_mapped;
+  assign io_active = fexx & mapped_io;
 
   // romcs_n: Active low on addresses $FFxx, or on addresses
-  // $8000 and up when rom_mapped is set and no I/O is active.
-  assign romcs_n= ! (ffxx | (i_addr[15] & rom_mapped & !io_active));
+  // $8000 and up when the 32K ROM is mapped and no I/O is active.
+  assign romcs_n= ! (ffxx | (i_addr[15] & mapped_rom & !io_active));
 
   // ramcs_n: Active low when neither the ROM or I/O are active.
   assign ramcs_n= !romcs_n | io_active;
@@ -112,26 +110,68 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   // because the data bus isn't valid until then.
   //
   // The address map for the I/O area is (in 16-byte regions):
-  // $FE00: RTC chip select
   // $FE10: UART read enable
   // $FE20: UART write enable
   // $FE30: CH375 read enable
   // $FE40: CH375 write enable
   // $FE50: map in/out the 32K ROM using the low address bit
-  // $FE60: map out the I/O area
+  // $FE60: map out both the I/O area and the 32K ROM
   // $FE70: eight page table entries
+  // $FE80: go back to the previous I/O area and 32K ROM toggle values
 
-  assign rtccs_n=  (i_eclk & io_active & i_addr[7:4] == 4'h0) ? 0 : 1;
   assign uartrd_n= (i_eclk & io_active & i_addr[7:4] == 4'h1) ? 0 : 1;
   assign uartwr_n= (i_eclk & io_active & i_addr[7:4] == 4'h2) ? 0 : 1;
   assign chrd_n=   (i_eclk & io_active & i_addr[7:4] == 4'h3) ? 0 : 1;
   assign chwr_n=   (i_eclk & io_active & i_addr[7:4] == 4'h4) ? 0 : 1;
 
-  always @(posedge i_eclk) begin
-    if (io_active & i_addr[7:4] == 4'h5) rom_mapped <= i_addr[0];
-    if (io_active & i_addr[7:4] == 4'h6) io_pte_mapped <= 0;
-  end
+  // In the following code we need to make a change when i_bs is high.
+  // It stays high across two clock cycles. So we keep a state variable
+  // to ensure we only make the change on one of the clock cycles.
+  reg prev_bs;
+  initial prev_bs = 1'b0;
 
+  // Deal with changes to the current io_pte_mapped and rom_mapped
+  // values, and do the stacking and unstacking of their values
+  always @(posedge i_eclk) begin
+
+    // Set prev_bs back to zero when i_bs falls
+    if (i_bs == 1'b0)
+      prev_bs = 1'b0;
+
+    // On a reset, set both toggles true and go back to index zero.
+    if (i_reset == 1'b0) begin
+      io_idx = 2'b00;
+      io_pte_mapped[0] = 1'b1;
+      rom_mapped[0] = 1'b1;
+    end
+
+    // When BS goes high, move up to the next index position and set
+    // both toggles true. Do the increment first. Flip the prev_bs
+    // to ensure that we only do this on one of the two clock cycles
+    // when i_bs is high
+    else if (i_bs == 1'b1 && prev_bs == 1'b0) begin
+      io_idx = io_idx + 2'b01;
+      io_pte_mapped[io_idx] = 1'b1;
+      rom_mapped[io_idx]    = 1'b1;
+      prev_bs = 1'b1;
+    end
+
+    // On an $FE5x access, en/disable the 32K ROM using the address lsb.
+    else if (io_active & i_addr[7:4] == 4'h5) begin
+      rom_mapped[io_idx] = i_addr[0];
+    end
+
+    // On an $FE6x access, disable both the I/O area and the 32K ROM.
+    else if (io_active & i_addr[7:4] == 4'h6) begin
+      io_pte_mapped[io_idx] = 1'b0;
+      rom_mapped[io_idx]    = 1'b0;
+    end
+
+    // On an $FE8x access, go back to the previous I/O area & 32K ROM values
+    else if (io_active & i_addr[7:4] == 4'h8) begin
+      io_idx = io_idx - 2'b01;
+    end
+  end
 
   ///////////////////////
   // MEMORY MANAGEMENT //
@@ -157,8 +197,7 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
 
   // Page table entry updates on kernel writes to $FF7x.
   always @(posedge i_eclk)
-    if (io_active & i_addr[7:4] == 4'h7) pgtable[writeindex] <= i_data;
-
+    if (io_active & i_addr[7:4] == 4'h7) pgtable[writeindex] = i_data;
 
   /////////////////////////
   // PAGE FAULT HANDLING //
@@ -169,25 +208,43 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   // We have a small state machine for page fault handling, so
   // that we drop the interrupt line and raise it soon after.
 
-  // Three states: no page fault (11), a page fault is signalled before
-  // we get to kernel mode (10),  the page fault signal is disabled before
-  // we get to kernel mode (01). The low bit becomes the interrupt signal.
+  // Three states: 
+  //   11: no page fault
+  //   10: a page fault is signalled before we get to kernel mode
+  //   01: the page fault signal is disabled before we get to kernel mode
+  // The low bit becomes the interrupt signal.
 
   reg [1:0] faultstate;
   initial faultstate = 2'b11;
-  assign pgfault_n= faultstate[0];	  // Output to the NMI line
+  assign pgfault_n= faultstate[0];        // Output to the NMI line
 
   always @(posedge i_eclk) begin
-	  				  // Invalid page in user mode:
-					  // signal a page fault.
-    if (faultstate == 2'b11 & pte[7] & !io_pte_mapped)
+                                          // Invalid page in user mode:
+                                          // signal a page fault.
+    if (faultstate == 2'b11 & pte[7] & !mapped_io)
       faultstate <= 2'b10;
-    if (faultstate == 2'b10)		  // Turn it off a clock cycle later
+    if (faultstate == 2'b10)              // Turn it off a clock cycle later
       faultstate <= 2'b01;
-    if (faultstate == 2'b01 & io_pte_mapped) // And set to no fault once we
-      faultstate <= 2'b11;		  // reach kernel mode
-    if (i_reset == 1'b0)		  // No fault after a reset
+    if (faultstate == 2'b01 & mapped_io) // And set to no fault once we
+      faultstate <= 2'b11;                // reach kernel mode
+    if (i_reset == 1'b0)                  // No fault after a reset
       faultstate <= 2'b11;
+  end
+
+  ////////////
+  // BLINKY //
+  ////////////
+
+  // XXX This code is just to test that we
+  // can program the CPLD. Eventually we will
+  // re-purpose it to be the clock tick for
+  // the board.
+
+  reg [19:0] counter;
+  initial counter = 20'h00000;
+
+  always @(posedge i_eclk) begin
+    counter <= counter + 1;
   end
 
 endmodule
