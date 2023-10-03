@@ -12,9 +12,10 @@ chcmdwr		equ    $fe41
 
 ; Addresses to enable/disable the 32K ROM
 ; and to disable the I/O area at $FExx
-disablerom	equ	$fe50
-enablerom	equ	$fe51
-disableio	equ	$fe60
+disablerom	equ	$fe50		; Disable the 32K ROM
+enablerom	equ	$fe51		; Enable the 32K ROM
+disableio	equ	$fe60		; Disable both I/O area and 32K ROM
+prevmode        equ     $fe80           ; Go back to previous user/kernel mode
 
 ; Page table entries
 pte0		equ	$fe70
@@ -94,6 +95,7 @@ uartirq		lda	uartrd		; Get the character from the UART
 		sta	uartch		; and save it in the 1-char buffer
 		lda	#$01		; Set the status flag
 		sta	uartflg
+		sta	prevmode	; Go back to the previous user/kernel mode
 		rti
 
 ; CH375 FIRQ Handler
@@ -108,30 +110,29 @@ ch375firq	pshs	a
         	lda     chdatard        ; Get the result back
         	sta     chstatus
 		puls	a
+		sta	prevmode	; Go back to the previous user/kernel mode
         	rti
 
-; SWI system call handler
-swihandler	cmpx	#17		; Syscall 17 is putchar()
+; SWI2 system call handler
+swi2handler	cmpx	#17		; Syscall 17 is putchar()
 		bne	1f
 		jsr	putc
 		jmp	swidone
 1		cmpx	#23		; Syscall 23 is getchar()
 		bne	2f
 		jsr	getc
+		sta     1,S             ; Overwrite the A on the RTI stack
 		jmp	swidone
 2		cmpx	#1		; Syscall 1 is exit()
 		bne	3f
 		jmp	main		; Restart monitor on exit()
-3		cmpx	#69		; Syscall 69 is sbrk()
+3		cmpx	#18		; Syscall 18 is printint() but in hex
 		bne	4f
-		jmp	swidone		; Do nothing for sbrk()
-4		cmpx	#18		; Syscall 18 is printint() but in hex
-		bne	5f
 		jsr	prhex		; Print A then B
 		tfr	b,a
 		jsr	prhex
 		jmp	swidone
-5
+4
 swidone		jmp	swiend		; Go to top 256 bytes of ROM
 
 ; Print out the NUL-terminated string which X points at
@@ -374,7 +375,7 @@ usage		ldx	#usagemsg
 
 ; Message strings
 
-welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.25 $\r\n\r\n"
+welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.26 $\r\n\r\n"
 
 usagemsg	fcc	"DXXXX - dump 16 bytes at $XXXX. If D by itself,\r\n"
 		fcc	"        dump starting past the last dump command\r\n"
@@ -590,30 +591,25 @@ putbyte
 		sta     ,x+
 		sta	enablerom
 		rts
-; Disable the 32K ROM and the I/O area, and start the program at
-; the dump address. They will have to do an exit syscall to get
-; back to the monitor.
+
+; Disable the 32K ROM and the I/O area (i.e. go to user mode)
+; and start the program at the dump address. They will have
+; to do an exit syscall to get back to the monitor.
 
 runprog
-		sta	disablerom
 		sta	disableio
 		jmp	[dumpaddr]	; Call subroutine at the dump address
 
 swiend					; Go back to user mode
-		sta	disablerom
-		sta	disableio
+		sta	prevmode
 		rti
-
-premain
-		sta	enablerom
-		jmp	main
 
 ; Vector table for the interrupt handlers and boot code
 
-		org	$fff6
-		fdb	ch375firq
+		org	$fff4
+		fdb	swi2handler
+		org	$fff8
 		fdb	uartirq
-		fdb	swihandler
 		org	$fffe
-		fdb	premain
+		fdb	main
 		end

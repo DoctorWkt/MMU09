@@ -180,6 +180,7 @@ void set_memory(unsigned addr, UINT8 data) {
 // printf("I/O disabled\n");
 	  // Go to user mode and map out the I/O area and 32K ROM
 	  io_active[io_idx]= 0;
+	  rom_mapped[io_idx]= 0;
 	  return;
         case 0xfe70:
         case 0xfe71:
@@ -198,6 +199,8 @@ void set_memory(unsigned addr, UINT8 data) {
         case 0xfe80:
 	  // Drop back to a previous I/O and 32K ROM mapping
 	  io_idx--;
+// printf("Moved io_idx down to %d: %d %d\n",
+//	io_idx, io_active[io_idx], rom_mapped[io_idx]);
   	  if (io_idx<0) {
     	    fprintf(stderr, "Too many unstacked interrupts!\n"); exit(1);
   	  }
@@ -263,4 +266,6 @@ void set_io_active(void) {
   }
   io_active[io_idx] = 1;
   rom_mapped[io_idx]= 1;
+// printf("Moved io_idx up to %d: %d %d\n",
+// 	io_idx, io_active[io_idx], rom_mapped[io_idx]);
 }
