@@ -1,0 +1,6 @@
+#!/bin/sh
+make xv6rom.img
+if [ ! -f "xv6rom.img" ]
+then echo xv6rom.img does not exist; exit 1
+fi
+minipro -p 'AT28C256' -y -w xv6rom.img

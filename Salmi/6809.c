@@ -81,7 +81,7 @@ static void WRMEM (unsigned addr, unsigned data)
   if (watchhead != NULL) {
     for (this= watchhead; this!= NULL; this=this->next)
       if (this->addr == addr) {
-        printf("\nWatchpoint $%04X\n", addr);
+        printf("\nWatchpoint $%04X: $%02X\n", addr, data);
 	monitor_on = 1;
       }
   }

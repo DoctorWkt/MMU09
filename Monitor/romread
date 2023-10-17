@@ -1,0 +1,2 @@
+#!/bin/sh
+minipro -p 'AT28C256' -y -r newdata.bin

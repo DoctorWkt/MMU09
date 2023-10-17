@@ -1,0 +1,8 @@
+libc.l
+liberror.txt
+syscall.l
+syslib.l
+syslib*.lib
+curses*.lib
+m6809.lib
+termcap*.lib

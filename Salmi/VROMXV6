@@ -1,0 +1,7 @@
+#!/bin/sh
+./6809 -i ../fs.img ../XV6FS/xv6rom \
+	-x \
+	$*
+stty sane
+#	-d $HOME/debug.out \
+#	-x

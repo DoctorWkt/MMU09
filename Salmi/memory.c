@@ -48,11 +48,12 @@ void init_memory(void) {
     memset (frame[i], 0, PAGESIZE);
   }
 
-  // Put us into kernel mode and activate the I/O area and 32K ROM.
+  // Put us into kernel mode and activate the I/O area.
+  // Keep the 32K ROM deactivated.
   // Point the pages to the first eight frames. Mark them as valid.
-  io_active[0] = 1;
-  rom_mapped[0] = 1;
   io_idx = 0;
+  io_active[0] = 1;
+  rom_mapped[0] = 0;
   for (int i=0; i < NUMPAGES; i++) {
     pte[i].frame= frame[i];
     pte[i].pteval= i;
@@ -75,6 +76,12 @@ UINT8 memory(unsigned addr) {
     fprintf(stderr, "bad addr 0x%04x PC 0x%04x in memory()\n",
 	addr, get_pc()); exit(1);
   }
+
+#if 0
+  pagenum= addr >> 13;
+  printf("%d: %X %X\n", pte[pagenum].pteval,
+	(addr >> 8) & 0xff, addr & 0xff);
+#endif
 
   // Access to the top 256 bytes always comes from ROM.
   if (addr >= 0xff00) {
@@ -141,6 +148,12 @@ void set_memory(unsigned addr, UINT8 data) {
 	addr, get_pc()); exit(1);
   }
 
+#if 0
+  pagenum= addr >> 13;
+  printf("%d: %X %X\n", pte[pagenum].pteval,
+	(addr >> 8) & 0xff, addr & 0xff);
+#endif
+
   // Can't access the top 256 bytes as it is ROM.
   if (addr >= 0xff00) {
     fprintf(stderr, "ROM write 1 at 0x%04x PC 0x%04x in set_memory()\n",
@@ -178,9 +191,11 @@ void set_memory(unsigned addr, UINT8 data) {
           return;
         case 0xfe60:
 // printf("I/O disabled\n");
-	  // Go to user mode and map out the I/O area and 32K ROM
-	  io_active[io_idx]= 0;
-	  rom_mapped[io_idx]= 0;
+	  // Go to user mode and map out the I/O area and 32K ROM.
+	  // Also go back to io_idx zero.
+	  io_idx= 0;
+	  io_active[0]= 0;
+	  rom_mapped[0]= 0;
 	  return;
         case 0xfe70:
         case 0xfe71:
@@ -191,6 +206,7 @@ void set_memory(unsigned addr, UINT8 data) {
         case 0xfe76:
         case 0xfe77:
 	  // Update a page table entry
+// printf("Setting pte%d to 0x%x\n", addr & (NUMPAGES-1), data);
 	  pagenum= addr & (NUMPAGES-1);
 	  framenum= data & (NUMFRAMES-1);
 	  pte[pagenum].frame= frame[framenum];
@@ -258,14 +274,14 @@ void set_initial_memory(unsigned addr, UINT8 data) {
 
 // Set kernel mode and make the I/O area visible
 void set_io_active(void) {
-//printf("Both I/O and ROM mapped\n");
   // Move up to the next position, so we remember the previous settings
   io_idx++;
   if (io_idx==4) {
     fprintf(stderr, "Too many stacked interrupts!\n"); exit(1);
   }
   io_active[io_idx] = 1;
-  rom_mapped[io_idx]= 1;
+  rom_mapped[io_idx]= 0;
+// printf("I/O mapped, ROM unmapped\n");
 // printf("Moved io_idx up to %d: %d %d\n",
-// 	io_idx, io_active[io_idx], rom_mapped[io_idx]);
+//	io_idx, io_active[io_idx], rom_mapped[io_idx]);
 }

@@ -89,52 +89,6 @@ getputc		jsr	getc		; Get a character
 1		jsr	putc
 		rts
 
-; UART IRQ Handler
-
-uartirq		lda	uartrd		; Get the character from the UART
-		sta	uartch		; and save it in the 1-char buffer
-		lda	#$01		; Set the status flag
-		sta	uartflg
-		sta	prevmode	; Go back to the previous user/kernel mode
-		rti
-
-; CH375 FIRQ Handler
-
-; When we get a fast IRQ, send CMD_GET_STATUS to the
-; CH375 to stop the interrupt. Get the current status
-; and store it in chstatus. Push/pop A to ensure it's intact.
-; Also print a '@' to indicate we did the FIRQ.
-ch375firq	pshs	a
-		lda	#$22		; CMD_GET_STATUS
-		sta     chcmdwr
-        	lda     chdatard        ; Get the result back
-        	sta     chstatus
-		puls	a
-		sta	prevmode	; Go back to the previous user/kernel mode
-        	rti
-
-; SWI2 system call handler
-swi2handler	cmpx	#17		; Syscall 17 is putchar()
-		bne	1f
-		jsr	putc
-		jmp	swidone
-1		cmpx	#23		; Syscall 23 is getchar()
-		bne	2f
-		jsr	getc
-		sta     1,S             ; Overwrite the A on the RTI stack
-		jmp	swidone
-2		cmpx	#1		; Syscall 1 is exit()
-		bne	3f
-		jmp	main		; Restart monitor on exit()
-3		cmpx	#18		; Syscall 18 is printint() but in hex
-		bne	4f
-		jsr	prhex		; Print A then B
-		tfr	b,a
-		jsr	prhex
-		jmp	swidone
-4
-swidone		jmp	swiend		; Go to top 256 bytes of ROM
-
 ; Print out the NUL-terminated string which X points at
 ;
 puts		pshs	a		; Save A
@@ -229,14 +183,14 @@ ch375init
 	sta     chcmdwr
 
 	ldb	#$ff			; and delay loop for reset to work
-1	sta	$FFFF
-	sta	$FFFF
-	sta	$FFFF
-	sta	$FFFF
-	sta	$FFFF
-	sta	$FFFF
-	sta	$FFFF
-	sta	$FFFF
+1	sta	dumpaddr
+	sta	dumpaddr		; Use dumpaddr as it's not in use here
+	sta	dumpaddr
+	sta	dumpaddr
+	sta	dumpaddr
+	sta	dumpaddr
+	sta	dumpaddr
+	sta	dumpaddr
 	decb
 	bne	1b
 
@@ -375,16 +329,18 @@ usage		ldx	#usagemsg
 
 ; Message strings
 
-welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.26 $\r\n\r\n"
+welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.30 $\r\n\r\n"
 
 usagemsg	fcc	"DXXXX - dump 16 bytes at $XXXX. If D by itself,\r\n"
 		fcc	"        dump starting past the last dump command\r\n"
 		fcc	"AXXXX XX XX XX XX ...\r\n"
 		fcc	"      - alter memory at $XXXX with new bytes\r\n"
-		fcc	"GXXXX - run code at $XXXX\r\n"
+		fcc	"GXXXX - run code at $XXXX in user mode\r\n"
+		fcc	"KXXXX - run code at $XXXX in kernel mode\r\n"
 		fcc	"L     - load s19 file into memory\r\n"
 		fcc	"?     - show this usage message\r\n"
-		fcn	"XX stands for hex digits: 0-9, a-f, A-F\r\n"
+		fcc	"XX stands for hex digits: 0-9, a-f, A-F\r\n"
+		fcn	"D and A commands run with RAM in upper memory\r\n"
 
 unknownmsg	fcn	"Unknown command\r\n\r\n"
 
@@ -440,9 +396,13 @@ getcmd		jsr	getputc		; Get the command letter
 		cmpa	#'L
 		lbeq	load
 		cmpa	#'g
-		beq	go		; g or G is execute code
+		beq	go		; g or G is execute code in user mode
 		cmpa	#'G
 		beq	go
+		cmpa	#'k
+		beq	kgo		; k or K is execute code in kernel mode
+		cmpa	#'K
+		beq	kgo
 		cmpa	#'a
 		lbeq	alter
 		cmpa	#'A
@@ -484,17 +444,26 @@ dump
 		jsr	puts
 		jmp	prompt		; and prompt for next command
 		
-go
+go					; Run program in user mode
 		jsr	getdumpaddr	; Get the dump address
 		cmpa	#$0a		; Skip EOLN loop if we are there
 		beq	2f		; already
 1		jsr	getputc		; Loop getting
 		cmpa	#$0a		; characters until EOLN
 		bne	1b
-2		jmp	runprog		; Call subroutine at the dump address
+2		jmp	runprog		; Call subroutine at the dump address.
+					; It has to syscall exit to end.
+		
+kgo					; Run program in kernel mode
+		jsr	getdumpaddr	; Get the dump address
+		cmpa	#$0a		; Skip EOLN loop if we are there
+		beq	2f		; already
+1		jsr	getputc		; Loop getting
+		cmpa	#$0a		; characters until EOLN
+		bne	1b
+2
+		jsr	[dumpaddr]	; Call subroutine at the dump address
 
-					; XXX We never get to here! XXX
-					; Leftover code from before.
 		ldx	#crlfmsg	; Move to the next line
 		jsr	puts
 		jmp	prompt		; and prompt for next command
@@ -576,6 +545,56 @@ alterbytes				; Now get a byte
 ; Top 256 bytes of ROM. This part of ROM can never get mapped out.
 		org	$ff00
 
+; UART IRQ Handler
+
+uartirq		lda	uartrd		; Get the character from the UART
+		sta	uartch		; and save it in the 1-char buffer
+		lda	#$01		; Set the status flag
+		sta	uartflg
+		sta	prevmode	; Go back to the previous user/kernel mode
+		rti
+
+; CH375 FIRQ Handler
+
+; When we get a fast IRQ, send CMD_GET_STATUS to the
+; CH375 to stop the interrupt. Get the current status
+; and store it in chstatus. Push/pop A to ensure it's intact.
+ch375firq	pshs	a
+		lda	#$22		; CMD_GET_STATUS
+		sta     chcmdwr
+        	lda     chdatard        ; Get the result back
+        	sta     chstatus
+		puls	a
+		sta	prevmode	; Go back to the previous user/kernel mode
+        	rti
+
+; SWI2 system call handler
+swi2handler	sta	enablerom	; Turn on the 32K ROM
+		cmpx	#17		; Syscall 17 is putchar()
+		bne	1f
+		jsr	putc
+		jmp	swidone
+1		cmpx	#23		; Syscall 23 is getchar()
+		bne	2f
+		jsr	getc
+		sta	disablerom	; Turn off the 32K ROM in case
+					; the stack is $8000 or higher
+		sta     1,S             ; Overwrite the A on the RTI stack
+		jmp	swidone
+2		cmpx	#1		; Syscall 1 is exit()
+		bne	3f
+		jmp	main		; Restart monitor on exit()
+3		cmpx	#18		; Syscall 18 is printint() but in hex
+		bne	4f
+		jsr	prhex		; Print A then B
+		tfr	b,a
+		jsr	prhex
+		jmp	swidone
+4
+swidone					; Go back to user mode
+		sta	prevmode
+		rti
+
 ; Get the byte that X points at into A, and increment A.
 ; Disable/enable the 32K ROM at the same time
 getbyte	
@@ -600,16 +619,16 @@ runprog
 		sta	disableio
 		jmp	[dumpaddr]	; Call subroutine at the dump address
 
-swiend					; Go back to user mode
-		sta	prevmode
-		rti
+premain
+		sta	enablerom	; Turn on the 32K ROM
+		jmp	main
 
 ; Vector table for the interrupt handlers and boot code
 
 		org	$fff4
 		fdb	swi2handler
-		org	$fff8
+		fdb	ch375firq
 		fdb	uartirq
 		org	$fffe
-		fdb	main
+		fdb	premain
 		end

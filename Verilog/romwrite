@@ -1,0 +1,8 @@
+#!/bin/sh
+if [ ! -f "monitor.bin" ]
+then make monitor.bin
+fi
+if [ ! -f "monitor.bin" ]
+then echo monitor.bin does not exist; exit 1
+fi
+minipro -p 'AT28C256' -y -w monitor.bin

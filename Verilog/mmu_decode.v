@@ -1,6 +1,6 @@
 // MMU and address decoding for the MMU09 SBC
 // (c) 2023 Warren Toomey, BSD license
-// $Revision: 1.42 $
+// $Revision: 1.47 $
 
 // This version puts 256 of ROM at $FFxx, the I/O area at $FExx
 // and the rest of the ROM from $8000 up to $FDFF. There is a
@@ -43,8 +43,8 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   // INTERRUPT MULTIPLEXING //
   ////////////////////////////
 
-  assign irq_n= i_uartirq;
-  assign firq_n= 1'b1;		// For now until we use the CH375
+  assign irq_n=  i_uartirq;
+  assign firq_n= i_chirq;
 
   ////////////////
   // HALT LOGIC //
@@ -70,39 +70,34 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   // rom_mapped: when true, most of the 32K of ROM is mapped in to memory
   // from $8000 up. When false, RAM pages are mapped at the same locations.
   reg rom_mapped[0:3];
-  initial rom_mapped[0] = 1'b1;
+  initial rom_mapped[0] = 1'b0;
 
   // io_idx is the index to the above two arrays.
   reg [1:0] io_idx;
   initial io_idx = 2'b00;
 
   // Wires that point at the current toggle values
-  wire mapped_io;
-  wire mapped_rom;
-  assign mapped_io  = io_pte_mapped[io_idx];
-  assign mapped_rom = rom_mapped[io_idx];
+  wire mapped_io  = io_pte_mapped[io_idx];
+  wire mapped_rom = rom_mapped[io_idx];
 
   // ffxx: active high for $FFxx addresses (top 256 ROM bytes)
-  wire ffxx;
-  assign ffxx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
-               i_addr[11] & i_addr[10] & i_addr[9]  & i_addr[8];
+  wire ffxx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
+             i_addr[11] & i_addr[10] & i_addr[9]  & i_addr[8];
 
-  // fexx: active high for $FExx addresses (I/O)
-  wire fexx;
-  assign fexx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
-               i_addr[11] & i_addr[10] & i_addr[9]  & !i_addr[8];
+  // fexx: active high for $FExx addresses (I/O area)
+  wire fexx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
+             i_addr[11] & i_addr[10] & i_addr[9]  & !i_addr[8];
 
   // This wire is true when we have an $FExx 
   // address and the I/O area is enabled.
-  wire io_active;
-  assign io_active = fexx & mapped_io;
+  wire io_active = fexx & mapped_io;
 
   // romcs_n: Active low on addresses $FFxx, or on addresses
   // $8000 and up when the 32K ROM is mapped and no I/O is active.
   assign romcs_n= ! (ffxx | (i_addr[15] & mapped_rom & !io_active));
 
-  // ramcs_n: Active low when neither the ROM or I/O are active.
-  assign ramcs_n= !romcs_n | io_active;
+  // ramcs_n: Active low when i_eclk high and neither the ROM or I/O are active.
+  assign ramcs_n= !( i_eclk & (romcs_n & !io_active));
 
   // I/O is mapped into the address range $FE00 to $FE7F when io_active.
   // Decode some of the address bits for the various chip select lines.
@@ -138,33 +133,36 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
     if (i_bs == 1'b0)
       prev_bs = 1'b0;
 
-    // On a reset, set both toggles true and go back to index zero.
+    // On a reset, set the I/O toggle true, the 32K ROM toggle false
+    //  and go back to index zero.
     if (i_reset == 1'b0) begin
-      io_idx = 2'b00;
-      io_pte_mapped[0] = 1'b1;
-      rom_mapped[0] = 1'b1;
+      io_idx 	        = 2'b00;
+      io_pte_mapped[0] <= 1'b1;
+      rom_mapped[0]    <= 1'b0;
     end
 
     // When BS goes high, move up to the next index position and set
-    // both toggles true. Do the increment first. Flip the prev_bs
+    // only the I/O toggle true. Do the increment first. Flip the prev_bs
     // to ensure that we only do this on one of the two clock cycles
     // when i_bs is high
     else if (i_bs == 1'b1 && prev_bs == 1'b0) begin
-      io_idx = io_idx + 2'b01;
-      io_pte_mapped[io_idx] = 1'b1;
-      rom_mapped[io_idx]    = 1'b1;
-      prev_bs = 1'b1;
+      io_idx		     = io_idx + 2'b01;
+      io_pte_mapped[io_idx] <= 1'b1;
+      rom_mapped[io_idx]    <= 1'b0;
+      prev_bs		     = 1'b1;
     end
 
     // On an $FE5x access, en/disable the 32K ROM using the address lsb.
     else if (io_active & i_addr[7:4] == 4'h5) begin
-      rom_mapped[io_idx] = i_addr[0];
+      rom_mapped[io_idx] <= i_addr[0];
     end
 
     // On an $FE6x access, disable both the I/O area and the 32K ROM.
+    // Also go back to io_idx zero.
     else if (io_active & i_addr[7:4] == 4'h6) begin
-      io_pte_mapped[io_idx] = 1'b0;
-      rom_mapped[io_idx]    = 1'b0;
+      io_idx 	        = 2'b00;
+      io_pte_mapped[0] <= 1'b0;
+      rom_mapped[0]    <= 1'b0;
     end
 
     // On an $FE8x access, go back to the previous I/O area & 32K ROM values
@@ -189,10 +187,9 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   wire [2:0] writeindex= i_addr[2:0];
 
   // Page table entry found by indexing the page table.
-  wire [7:0] pte;
+  wire [7:0] pte= pgtable[pgindex];
 
-  // Page mapping. Six bits become the frame number.
-  assign pte= pgtable[pgindex];
+  // Six bits of the pte become the frame number.
   assign paddr= pte[5:0];
 
   // Page table entry updates on kernel writes to $FF7x.
