@@ -18,52 +18,54 @@ In user mode, the whole 64K of address
 space is RAM except the top 256 bytes at `$FF00 - $FFFF` which is ROM.
 
 When in kernel mode, addresses `$FE00 - $FEFF` become an area for
-performing I/O and manipulating the page table entries. And nearly
-32K of ROM gets mapped in from addresses `$8000 - $FDFF`.
+performing I/O and manipulating the page table entries. And 
+24K of ROM gets mapped in from addresses `$2000 - $7FFF`.
 
-This memory layout provides each process with nearly 64K of RAM memory and prevents
-processes from doing I/O or changing the page table entries directly. It also allows
-the kernel to reside in nearly 32K of ROM. Only the kernel in ROM can access the I/O
-devices because they only get memory-mapped when in kernel mode.
+This memory layout provides each process with 63.5K of RAM memory and prevents
+processes from doing I/O or changing the page table entries directly. It also
+allows the kernel to reside in 24K of ROM. Only the kernel in ROM can access
+the I/O devices because they only get memory-mapped when in kernel mode.
 
 ![address map table](addressmap.png)
 
 A user process can transition to kernel mode by executing one of the `SWI`
-instructions. This causes the CPU to jump to the handler for the relevant instruction
-which is in the top 256 bytes of memory. This enables the 256 byte I/O area at
-`$FE00 - $FEFF` and the 32K of ROM at `$8000 - $FDFF`.
+instructions. This causes the CPU to jump to the handler for the relevant
+instruction which is in the top 256 bytes of memory. This enables the 256
+byte I/O area at `$FE00 - $FEFF` and the 24K of ROM at `$2000 - $7FFF`.
 
-To get from kernel mode back to user mode, the operating system jumps up to the top
-256 bytes of ROM. From here, it can hide the I/O area and 32K ROM by tickling I/O memory
-location `$FE60`. Then the operating system can return from interrupt and go back to the code
-running in user mode.
+To get from kernel mode back to user mode, the operating system jumps up to
+the top 256 bytes of ROM. From here, it can hide the I/O area and 24K ROM by
+tickling I/O memory location `$FE60`. Then the operating system can return
+from interrupt and go back to the code running in user mode.
 
-## Hiding the 32K ROM
+## Hiding the 24K ROM
 
-It's useful to be able to hide the 32K of ROM when we are kernel mode. For example,
-perhaps the user program wants to write data out to the storage device, but the
-program has this data in a buffer starting at `$C000`. With the 32K ROM mapped in,
-this data is hidden.
+It's useful to be able to hide the 24K of ROM when we are kernel mode.
+For example, perhaps the user program wants to write data out to the
+storage device, but the program has this data in a buffer starting at
+`$C000`. With the 24K ROM mapped in, this data is hidden.
 
-In the I/O area, tickling address `$FE50` maps out the 32K of ROM and tickling address
-`$FE51` maps the 32K of ROM back in. To use this effectively, there will be a modified
-`memcpy()` routine in the top 256 bytes of RAM (always visible) that maps the 32K ROM out,
-does the data copy with the user data, and maps the 32K ROM back in.
+In the I/O area, tickling address `$FE50` maps out the 24K of ROM
+and tickling address `$FE51` maps the 24K of ROM back in. To use this
+effectively, there is a modified `memcpy()` routine in the top 256 bytes
+of RAM (always visible) that maps the 24K ROM out, does the data copy
+with the user data, and maps the 24K ROM back in.
 
 ## Stacking User/Kernel Modes
 
-One problem is that, when an interrupt routine is exiting, it doesn't know if to go back to
-user mode or to stay in kernel mode. An example is the UART interrupt handler which is started
-when a character arrives from the keyboard. Before the interrupt handler started, we might
-be in user mode running the user process. Or, we might be in kernel mode handling a system call
-like `read()`.
+One problem is that, when an interrupt routine is exiting, it doesn't
+know if to go back to user mode or to stay in kernel mode. An example
+is the UART interrupt handler which is started when a character arrives
+from the keyboard. Before the interrupt handler started, we might be
+in user mode running the user process. Or, we might be in kernel mode
+handling a system call like `read()`.
 
-To solve this problem, the CPLD keeps track of the last four user/kernel mode states. Just before
-an interrupt handler returns (with the `RTI` instruction), it can tickle the I/O address `$FE80`.
-This tells the CPLD to go back to the previous mode, be it kernel mode or user mode.
-
-Thus, we can stack a user mode, a system call and two nested interrupts and return back from
-each one safely.
+To solve this problem, the CPLD keeps track of the last four user/kernel
+mode states. Just before an interrupt handler returns (with the `RTI`
+instruction), it can tickle the I/O address `$FE80`.  This tells the
+CPLD to go back to the previous mode, be it kernel mode or user mode.
+Thus, we can stack a user mode, a system call and two nested interrupts
+and return back from each one safely.
 
 ## The MMU
 
@@ -81,17 +83,16 @@ I could keep 8K pages and this would let the MMU address 1M of RAM.
 
 ## Page Mapping
 
-The MMU only controls RAM mapping. In kernel mode, the 32K of ROM is always contiguous
-from `$8000` to `$FDFF` except for the I/O space. But the RAM from
-`$0000` to `$7FFF` and, in user mode, the RAM from `$8000` to `$FEFF` gets mapped
-through the MMU.
+The MMU only controls RAM mapping. In kernel mode, the 24K of ROM is
+always contiguous from `$2000` to `$7FFF`. But any visible RAM gets
+mapped through the MMU.
 
-When the CPU tries to access RAM at an address, the bottom thirteen bits of the
-address act as the offset into the page and these go directly to the RAM device.
-The top three bits go into the MMU and select one of the eight page table entries
-stored there. The low six bits of the entry are combined with the thirteen bits
-of page offset to create a 19-bit physical address which goes to the 512K RAM
-device.
+When the CPU tries to access visible RAM at an address, the bottom
+thirteen bits of the address act as the offset into the page and these
+go directly to the RAM device.  The top three bits go into the MMU and
+select one of the eight page table entries stored there. The low six
+bits of the entry are combined with the thirteen bits of page offset to
+create a 19-bit physical address which goes to the 512K RAM device.
 
 In kernel mode, the eight page table entries can be modified by writing to one
 of eight addresses in the I/O area. Thus, the kernel can set the RAM mapping for

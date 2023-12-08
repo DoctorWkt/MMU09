@@ -1,15 +1,15 @@
 # MMU09 - A 6809 single-board computer with an MMU
 
-*This is a work in progress! Don't build anything using this stuff yet.
-See [Docs/HARDWARE_FIX.md](Docs/HARDWARE_FIX.md) for a list of things which need fixing.*
-
 I'm working on a 6809 single-board computer with an external MMU, so I can
-port a Unix-like operating system for it, probably xv6 or Fuzix.
+bring up a Unix-like operating system for it. Currently this is the `xv6`
+filesystem with process code partially borrowed from `xv6`. The library 
+comes from FUZIX and the userland comes from multiple places, some
+self-written.
 
-The [Hardware](Hardware) folder has the hardware version of the system, as yet unbuilt nor
-tested. The main components are: the 6809, 32K ROM, 512K RAM, a dual UART, a
-CH375 device for storage, a real-time clock and an ATF1508 CPLD to implement
-address decoding and the MMU.
+The [Hardware](Hardware) folder has the hardware version of the system.
+The main components are: the 6809, 32K ROM, 512K RAM, a dual UART, a
+CH375 device for storage and an ATF1508 CPLD to implement address decoding
+and the MMU.
 
 The [Docs](Docs) folder has details of the design and the implementation.
 
@@ -17,9 +17,7 @@ The [Verilog](Verilog) folder has the Verilog code for the CPLD as well as
 a Verilog implementation of the 6809, ROM, RAM and a UART. This allows me to
 test the MMU to ensure that it will work before I build the hardware.
 
-I'd really like to get some feedback, ideas etc. on this project. I've borrowed
-a lot of ideas from other peoples' projects; when I get some time I'll list them
-here.
+I'd really like to get some feedback, ideas etc. on this project.
 
 ## Status - 1st September 2023
 
@@ -75,3 +73,19 @@ After fighting a problem with RAM for over a week, I found that my Verilog code
 for the RAM chip select was wrong. Now fixed. This allows me to get the xv6
 filesystem code up and running on the board. Each program now has a usable address
 space of $0000 to $FDFF, with the constraint that only code can be in $0000 to $1FFF.
+
+## Status - December 2023
+
+Things have been rearranged. I now have processes and multitasking, but
+no pre-emption as yet. There is `fork()`, `exec()`, `exit()` and `wait()`
+along with `pipe()`.
+
+I got the wiring of the RTC wrong, but I should be able to use the CPLD
+to generate clock ticks and do time keeping and pre-emption this way.
+
+I need to rewrite the shell to do file redirection in the child, not in the
+parent process. The shell worked when there was only one process; this is
+no longer the case.
+
+Processes now have 63.5K of address space with the constraint that the lower
+8K of address space cannot contain any data.
