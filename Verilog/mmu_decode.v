@@ -1,10 +1,10 @@
 // MMU and address decoding for the MMU09 SBC
 // (c) 2023 Warren Toomey, BSD license
-// $Revision: 1.47 $
+// $Revision: 1.49 $
 
 // This version puts 256 of ROM at $FFxx, the I/O area at $FExx
-// and the rest of the ROM from $8000 up to $FDFF. There is a
-// toggle for the nearly 32K of ROM from $8000 up to $FDFF.
+// and the rest of the ROM (24K) from $2000 up to $7FFF. There is a
+// toggle for the ROM from $2000 up to $7FFF.
 
 module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
 		  i_uartirq, i_chirq, i_rtcirq,
@@ -57,7 +57,7 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   //////////////////////
 
   // We have two toggles: one for the I/O area called io_pte_mapped
-  // and one for the 32K ROM area called rom_mapped. We keep a
+  // and one for the 24K ROM area called rom_mapped. We keep a
   // stack of these so that we can go back to the previous states
   // for both of them.
 
@@ -67,10 +67,10 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   reg io_pte_mapped[0:3];
   initial io_pte_mapped[0] = 1'b1;
 
-  // rom_mapped: when true, most of the 32K of ROM is mapped in to memory
-  // from $8000 up. When false, RAM pages are mapped at the same locations.
+  // rom_mapped: when true, 24K of ROM is mapped in to memory from $2000
+  // to $7FFF. When false, RAM pages are mapped at the same locations.
   reg rom_mapped[0:3];
-  initial rom_mapped[0] = 1'b0;
+  initial rom_mapped[0] = 1'b1;
 
   // io_idx is the index to the above two arrays.
   reg [1:0] io_idx;
@@ -88,13 +88,16 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   wire fexx= i_addr[15] & i_addr[14] & i_addr[13] & i_addr[12] &
              i_addr[11] & i_addr[10] & i_addr[9]  & !i_addr[8];
 
+  // low24: active high for the 24K ROM addresses: $2000 to $7FFF
+  wire low24= ! i_addr[15] & ( i_addr[14] | i_addr[13] );
+
   // This wire is true when we have an $FExx 
   // address and the I/O area is enabled.
   wire io_active = fexx & mapped_io;
 
-  // romcs_n: Active low on addresses $FFxx, or on addresses
-  // $8000 and up when the 32K ROM is mapped and no I/O is active.
-  assign romcs_n= ! (ffxx | (i_addr[15] & mapped_rom & !io_active));
+  // romcs_n: Active low on addresses $FFxx, or on
+  // addresses $2000 to $7FFF when the 24K ROM is mapped.
+  assign romcs_n= ! (ffxx | (mapped_rom & low24) );
 
   // ramcs_n: Active low when i_eclk high and neither the ROM or I/O are active.
   assign ramcs_n= !( i_eclk & (romcs_n & !io_active));
@@ -109,10 +112,10 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
   // $FE20: UART write enable
   // $FE30: CH375 read enable
   // $FE40: CH375 write enable
-  // $FE50: map in/out the 32K ROM using the low address bit
-  // $FE60: map out both the I/O area and the 32K ROM
+  // $FE50: map in/out the 24K ROM using the low address bit
+  // $FE60: map out both the I/O area and the 24K ROM
   // $FE70: eight page table entries
-  // $FE80: go back to the previous I/O area and 32K ROM toggle values
+  // $FE80: go back to the previous I/O area and 24K ROM toggle values
 
   assign uartrd_n= (i_eclk & io_active & i_addr[7:4] == 4'h1) ? 0 : 1;
   assign uartwr_n= (i_eclk & io_active & i_addr[7:4] == 4'h2) ? 0 : 1;
@@ -133,31 +136,31 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
     if (i_bs == 1'b0)
       prev_bs = 1'b0;
 
-    // On a reset, set the I/O toggle true, the 32K ROM toggle false
+    // On a reset, set the I/O toggle true, the 24K ROM toggle true
     //  and go back to index zero.
     if (i_reset == 1'b0) begin
       io_idx 	        = 2'b00;
       io_pte_mapped[0] <= 1'b1;
-      rom_mapped[0]    <= 1'b0;
+      rom_mapped[0]    <= 1'b1;
     end
 
     // When BS goes high, move up to the next index position and set
-    // only the I/O toggle true. Do the increment first. Flip the prev_bs
+    // the I/O and ROM toggle true. Do the increment first. Flip the prev_bs
     // to ensure that we only do this on one of the two clock cycles
     // when i_bs is high
     else if (i_bs == 1'b1 && prev_bs == 1'b0) begin
       io_idx		     = io_idx + 2'b01;
       io_pte_mapped[io_idx] <= 1'b1;
-      rom_mapped[io_idx]    <= 1'b0;
+      rom_mapped[io_idx]    <= 1'b1;
       prev_bs		     = 1'b1;
     end
 
-    // On an $FE5x access, en/disable the 32K ROM using the address lsb.
+    // On an $FE5x access, en/disable the 24K ROM using the address lsb.
     else if (io_active & i_addr[7:4] == 4'h5) begin
       rom_mapped[io_idx] <= i_addr[0];
     end
 
-    // On an $FE6x access, disable both the I/O area and the 32K ROM.
+    // On an $FE6x access, disable both the I/O area and the 24K ROM.
     // Also go back to io_idx zero.
     else if (io_active & i_addr[7:4] == 4'h6) begin
       io_idx 	        = 2'b00;
@@ -165,7 +168,7 @@ module mmu_decode(i_qclk, i_eclk, i_reset, i_rw, i_addr, i_data, i_bs,
       rom_mapped[0]    <= 1'b0;
     end
 
-    // On an $FE8x access, go back to the previous I/O area & 32K ROM values
+    // On an $FE8x access, go back to the previous I/O area & 24K ROM values
     else if (io_active & i_addr[7:4] == 4'h8) begin
       io_idx = io_idx - 2'b01;
     end

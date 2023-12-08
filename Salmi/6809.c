@@ -848,6 +848,9 @@ void firq (void)
 
   cPC = (memory(0xfff6) << 8) | memory(0xfff7);
   set_io_active();
+  if (debugout!=NULL) {
+    fprintf(debugout, "FIRQ to %04X\n", cPC);
+  }
 }
 
 void cwai (void)

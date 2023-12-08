@@ -10,11 +10,11 @@ chdatawr	equ    $fe40
 chcmdrd		equ    $fe31
 chcmdwr		equ    $fe41
 
-; Addresses to enable/disable the 32K ROM
+; Addresses to enable/disable the 24K ROM
 ; and to disable the I/O area at $FExx
-disablerom	equ	$fe50		; Disable the 32K ROM
-enablerom	equ	$fe51		; Enable the 32K ROM
-disableio	equ	$fe60		; Disable both I/O area and 32K ROM
+disablerom	equ	$fe50		; Disable the 24K ROM
+enablerom	equ	$fe51		; Enable the 24K ROM
+disableio	equ	$fe60		; Disable both I/O area and 24K ROM
 prevmode        equ     $fe80           ; Go back to previous user/kernel mode
 
 ; Page table entries
@@ -27,7 +27,7 @@ pte5		equ	$fe75
 pte6		equ	$fe76
 pte7		equ	$fe77
 
-stacktop	equ	$7770		; Top of stack, set by this monitor
+stacktop	equ	$fd7f		; Top of stack, set by this monitor
 
 ; CH375 commands
 CMD_RESET_ALL           equ 0x05
@@ -50,7 +50,7 @@ USB_INT_DISK_READ       equ 0x1D
 USB_INT_DISK_WRITE      equ 0x1E
 
 ; Variables
-		org	$7780
+		org	$fd80
 
 chstatus	fcb	#$00		; CH375 status after an FIRQ
 uartflg		fcb	#$00		; Flag indicating if there's a character in uartch, initially false
@@ -59,12 +59,8 @@ dumpaddr	fdb	#$ff00		; Start address for memory dumping
 temp1		fcb	#$00		; Temp variable
 temp2		fcb	#$00		; Temp variable
 
-; ROM starts at $8000 as it is a 32K part
-		org	$8000
-		nop
-
-; ROM code
-		org	$e000
+; 24K of ROM starts at $2000 (even though it is a 32K part)
+		org	$2000
 
 ; Get a character from the UART in A
 getc		lda	uartflg		; See if there is any UART data to read
@@ -329,7 +325,7 @@ usage		ldx	#usagemsg
 
 ; Message strings
 
-welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.30 $\r\n\r\n"
+welcomemsg	fcn	"Warren's Simple 6809 Monitor, $Revision: 1.34 $\r\n\r\n"
 
 usagemsg	fcc	"DXXXX - dump 16 bytes at $XXXX. If D by itself,\r\n"
 		fcc	"        dump starting past the last dump command\r\n"
@@ -340,7 +336,7 @@ usagemsg	fcc	"DXXXX - dump 16 bytes at $XXXX. If D by itself,\r\n"
 		fcc	"L     - load s19 file into memory\r\n"
 		fcc	"?     - show this usage message\r\n"
 		fcc	"XX stands for hex digits: 0-9, a-f, A-F\r\n"
-		fcn	"D and A commands run with RAM in upper memory\r\n"
+		fcn	"D and A commands run with RAM from $0000 to $FEFF\r\n"
 
 unknownmsg	fcn	"Unknown command\r\n\r\n"
 
@@ -353,9 +349,6 @@ s19msg		fcc	"Type in an s19 file with only S1 and S9 lines.\r\n"
 
 s19errmsg	fcn	"Unrecognised S line\r\n"
 
-
-; The main monitor code
-		org	$f800
 
 main		lds	#stacktop	; Set up the stack pointer
 		andcc	#$af		; Enable interrupts
@@ -569,7 +562,7 @@ ch375firq	pshs	a
         	rti
 
 ; SWI2 system call handler
-swi2handler	sta	enablerom	; Turn on the 32K ROM
+swi2handler
 		cmpx	#17		; Syscall 17 is putchar()
 		bne	1f
 		jsr	putc
@@ -577,8 +570,6 @@ swi2handler	sta	enablerom	; Turn on the 32K ROM
 1		cmpx	#23		; Syscall 23 is getchar()
 		bne	2f
 		jsr	getc
-		sta	disablerom	; Turn off the 32K ROM in case
-					; the stack is $8000 or higher
 		sta     1,S             ; Overwrite the A on the RTI stack
 		jmp	swidone
 2		cmpx	#1		; Syscall 1 is exit()
@@ -596,7 +587,7 @@ swidone					; Go back to user mode
 		rti
 
 ; Get the byte that X points at into A, and increment A.
-; Disable/enable the 32K ROM at the same time
+; Disable/enable the 24K ROM at the same time
 getbyte	
 		sta	disablerom
 		lda     ,x+
@@ -604,24 +595,20 @@ getbyte
 		rts
 
 ; Put byte in A to the address that X points at, and increment A.
-; Disable/enable the 32K ROM at the same time
+; Disable/enable the 24K ROM at the same time
 putbyte
 		sta	disablerom
 		sta     ,x+
 		sta	enablerom
 		rts
 
-; Disable the 32K ROM and the I/O area (i.e. go to user mode)
+; Disable the 24K ROM and the I/O area (i.e. go to user mode)
 ; and start the program at the dump address. They will have
 ; to do an exit syscall to get back to the monitor.
 
 runprog
 		sta	disableio
 		jmp	[dumpaddr]	; Call subroutine at the dump address
-
-premain
-		sta	enablerom	; Turn on the 32K ROM
-		jmp	main
 
 ; Vector table for the interrupt handlers and boot code
 
@@ -630,5 +617,5 @@ premain
 		fdb	ch375firq
 		fdb	uartirq
 		org	$fffe
-		fdb	premain
+		fdb	main
 		end

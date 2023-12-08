@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <xv6/param.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <romcalls.h>
 #include <readline/readline.h>
@@ -11,9 +12,7 @@ void cprintf(char *fmt, ...);
 #define MAXLIN 100		// Maximum line size
 
 int realargc;			// Real argc after parsing the command
-char *argv[MAXARG + 1];		// The argument list
-char *wordlist[MAXARG + 1];	// List of words after metachar expansion
-char binbuf[MAXLIN];		// Used to prepend "/bin/" to commands
+
 
 // Close any open file descriptors on exit
 void myexit(int x) {
@@ -76,7 +75,7 @@ int match(char *pattern, char *name) {
 }
 
 // Deal with redirections and pipelines in the current argv list
-void redirect(int argc) {
+void redirect(int argc, char *argv[]) {
   char seekbuf[MAXLIN];
   int fd, len;
 
@@ -195,20 +194,22 @@ void redirect(int argc) {
 	realargc = i;
 
       // Write the rest of the pipeline command to the file
-      for (i=i+1; i<argc; i++) {
-        write(fd, argv[i], strlen(argv[i]));
-        write(fd, " ", 1);
+      for (i = i + 1; i < argc; i++) {
+	write(fd, argv[i], strlen(argv[i]));
+	write(fd, " ", 1);
       }
 
       // Save the file and return now as there's nothing left to process
-      close(fd); return;
+      close(fd);
+      return;
     }
   }
 }
 
 // Parse the given line, generating argv
-int parse(char *buf) {
+int parse(char *buf, char *argv[]) {
   int wordc;
+  char *wordlist[MAXARG + 1];	// List of words after metachar expansion
   int argc = 0;
   int end;
   DIR *D;
@@ -282,93 +283,85 @@ int parse(char *buf) {
     argv[argc++] = wordlist[i];
   }
 
-  return(argc);
+  return (argc);
 }
 
 int main() {
-  int i, fd, datafd;
+  int i, fd, pid, wstatus;
   int argc;
-  char *buf=NULL;
+  char *buf = NULL;
+  char *argv[MAXARG + 1];	// The argument list
+  char binbuf[MAXLIN];		// Used to prepend "/bin/" to commands
 
-  // Close any open file descriptors
-  for (fd = 0; fd < NFILE; fd++)
-    sys_close(fd);
-
-  // Now open fds 0, 1 and 2 to the console
-  fd = sys_open("/tty", O_RDONLY);
-  fd = sys_open("/tty", O_WRONLY);
-  fd = sys_open("/tty", O_WRONLY);
-
-  // See if there is a pipe command that we need to process
-  fd= open("/.pipecmd", O_RDONLY);
-  if (fd != -1) {
-    // Yes there is. Check that we have pipe data
-    datafd= open("/.pipedata", O_RDONLY);
-    if (datafd == -1) {
-      cprintf("error: pipe command but no pipe data\n");
-      unlink("/.pipecmd"); myexit(1);
-    }
-
-    // Read in the command from the command file. NUL terminate it.
-    buf= (char *)malloc(MAXLIN);
-    if (buf==NULL) {
-      cprintf("malloc error\n"); myexit(1);
-    }
-    
-    int cnt=read(fd, buf, MAXLIN); close(fd); buf[cnt]=0;
-
-    // Dup the pipe data to be stdin
-    sys_close(0);
-    sys_dup(datafd);
-    sys_close(datafd);
-
-    // Now unlink both pipe files so they can be reused
-    unlink("/.pipecmd"); unlink("/.pipedata");
-  }
-
-  // Use readline() to get the input line if there is no pipeline command
-  if (buf==NULL)
+  while (1) {
+    // Use readline() to get the input line
     buf = readline("$ ");
 
-  // Parse the input line, generating argv
-  argc= parse(buf);
+    // Parse the input line, generating argv
+    argc = parse(buf, argv);
 
-  // See if the first argument is cd. If so, do the chdir and
-  // then myexit(), which will respawn the shell :-)
-  if (!strcmp(argv[0], "cd")) {
-    if (argc == 2) {
-      if (sys_chdir(argv[1]) == -1)
-	cprintf("Cannot cd to %s\n", argv[1]);
-    }
-    myexit(0);
-  }
-
-  // Try to open the argument.
-  if ((fd = open(argv[0], O_RDONLY)) == -1) {
-    // No such luck. Try putting "/bin/" on the front
-    strcpy(binbuf, "/bin/");
-    strcat(binbuf, argv[0]);
-    if ((fd = open(binbuf, O_RDONLY)) == -1) {
-      cprintf("%s: no such command\n", argv[0]);
-      myexit(0);
+    // See if the first argument is cd. If so, do the chdir and
+    // then go back to the top of the loop for the next command
+    if (!strcmp(argv[0], "cd")) {
+      if (argc == 2) {
+	if (sys_chdir(argv[1]) == -1)
+	  cprintf("Cannot cd to %s\n", argv[1]);
+      }
+      continue;
     }
 
-    argv[0] = binbuf;
+    // Try to open the argument.
+    if ((fd = open(argv[0], O_RDONLY)) == -1) {
+      // No such luck. Try putting "/bin/" on the front
+      strcpy(binbuf, "/bin/");
+      strcat(binbuf, argv[0]);
+      if ((fd = open(binbuf, O_RDONLY)) == -1) {
+	cprintf("%s: no such command\n", argv[0]);
+	continue;
+      }
+      argv[0] = binbuf;
+    }
+
+    // See if it's an executable: always start with 0x3406
+    read(fd, &i, 2);
+    if (i != 0x3406) {
+      cprintf("%s: not an executable\n", argv[0]);
+      close(fd); continue;
+    }
+    close(fd);
+
+    // Deal with any redirections
+    redirect(argc, argv);
+
+    // No arguments, loop back
+    if (argc==0) continue;
+
+    // Put a NULL at the end of the argv[] array
+    argv[realargc] = NULL;
+
+#if 0
+    // Debug
+    cprintf("sh argc %d\n", realargc);
+    for (i=0; i<realargc; i++)
+      cprintf("sh argv[%d] %s 0x%x\n", i, argv[i], argv[i]);
+#endif
+
+    // Now fork, start the new program and wait for it to exit
+    pid= fork();
+    switch (pid) {
+      case 0:				// The child
+        exec(argv[0], argv);
+	cprintf("Unable to exec %s\n", argv[0]);
+	exit(0);
+
+      case -1:
+	cprintf("Unable to fork()\n");
+	exit(0);
+
+      default:
+	pid= wait(&wstatus);
+    }
   }
 
-  // See if it's an executable: always start with 0x3406
-  read(fd, &i, 2);
-  if (i != 0x3406) {
-    cprintf("%s: not an executable\n", argv[0]);
-    myexit(0);
-  }
-  close(fd);
-
-  // Deal with any redirections
-  redirect(argc);
-
-  // Now copy the arguments onto the stack and start the new program
-  spawn(realargc, argv);
-
-  return (0);
+  return (0);	// Should never be used
 }

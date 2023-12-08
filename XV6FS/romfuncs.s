@@ -13,11 +13,11 @@
 	.set pte6, 0xfe76
 	.set pte7, 0xfe77
 
-; Enable/disable 32K ROM.
+; Enable/disable 24K ROM.
 	.set disablerom, 0xfe50
 	.set enablerom,	 0xfe51
 
-; Map out the I/O area and 32K ROM.
+; Map out the I/O area and 24K ROM.
 	.set disableio,	 0xfe60
 
 ; Go back to previous user/kernel mode.
@@ -56,11 +56,13 @@
 ; Terminal characteristics
 	.set TC_ECHO,		0x01	; Echo input characters
 
-; Top of user stack, top of kernel stack.
 ; Start of user code.
-	.set stacktop,	0xFDFD
-	.set kernstack, 0x1FFF
 	.set usercode,	0x0002
+
+; When booting, the kernel stack is in the
+; kernel data page. Once we have a process
+; context, we will use the user's stack.
+	.set kernstack, 0x1FFF
 
 ; Uninitialised variables
 	.bss
@@ -69,7 +71,10 @@ uartflg:	.zero 1			; Flag indicating if char in uartch,
 					; initially zero (false)
 uartch:		.zero 1			; UART character available to read
 					; if uartflg==1
-frame0:		.zero 1			; Which frame is at page zero
+frame0:		.zero 1			; Which frame is at page zero. Could be
+		.global frame0		; a user or a kernel frame
+uframe0:	.zero 1			; Which user frame last at page zero
+		.global uframe0
 termattr:	.zero 2			; Terminal characteristics
 
 usersp:		.zero 2			; Holds old user stack pointer
@@ -83,7 +88,7 @@ syscalltable:
 	.word sys_exit			; Offset $00
 	.word romgetputc		; Offset $02
 	.word romputc			; Offset $04
-	.word sys_spawn			; Offset $06
+	.word sys_exec			; Offset $06
 	.word sys_chdir			; Offset $08
 	.word sys_close			; Offset $0A
 	.word sys_dup			; Offset $0C
@@ -96,9 +101,29 @@ syscalltable:
 	.word sys_unlink		; Offset $1A
 	.word sys_write			; Offset $1C
 	.word tcattr			; Offset $1E
+	.word sys_fork			; Offset $20
+	.word sys_wait			; Offset $22
+	.word sys_getpid		; Offset $24
+	.word sys_kill			; Offset $26
+	.word sys_pipe			; Offset $28
 
 ; ROM routines
 	.text
+
+; These two functions allow us to save the stack pointer before
+; we enter the real functions. That way, we can return through
+; sched() regardless of what locals & pushed arguments happen
+; in the real functions.
+
+sys_fork:
+	.global sys_fork
+	sts	_schedsp
+	jmp	fork1
+
+sched:
+	.global	sched
+	sts	_schedsp
+	jmp	sched1
 
 ; Get and/or set the current terminal characteristics. D holds the
 ; command: 1 means set. The new value is on the stack. Always return
@@ -170,7 +195,7 @@ prnibble:	adda	#0x90		; Prepare A-F adjust
 		daa			; Adjust
 		adca	#0x40		; Prepare character bits
 		daa			; Adjust
-		tfr	a,b
+		tfr	A,B
 		jsr	romputc
 		rts
 
@@ -327,92 +352,73 @@ L15:	ldd	#1
 ; The code which is performed on a reset
 reset:
 	.global	reset
-	lda	#0		; Initialise a default page table
+	lda	#0		; Allocate page frame 0 for kernel data
 	sta	pte0
 	sta	frame0
-	lda	#1
-	sta	pte1
-	lda	#2
-	sta	pte2
-	lda	#3
-	sta	pte3
-	lda	#4
-	sta	pte4
-	lda	#5
-	sta	pte5
-	lda	#6
-	sta	pte6
-	lda	#7
-	sta	pte7
-
 	lds	#kernstack	; Set up the stack pointer
 	andcc	#0xaf		; Enable interrupts
-	jmp	zeroram		; Clear RAM memory
-reset1:
+
+	clra			; Clear the kernel data page
+	clrb
+	tfr	D,X
+.1:	std	,X++
+	cmpx	#0x2000
+	bne	.1
+
 	clra			; Reset the UART status flag
 	sta	uartflg
 	ldd	#TC_ECHO	; Set echo mode on the terminal
 	std	termattr
 
 	jsr	sys_init	; Initialise the filesystem structures
-	jmp	sys_exit
 
-; This is the middle part of the SWI2 handler,
-; once we've enabled the 32K ROM. It's here to
-; free up some space in the top 256 bytes of ROM.
-swi2middle:
-	sts	usersp		; Save the user's stack pointer
-	lds	#kernstack-16	; Move to the kernel stack
+; SWI2 handler. We were previously in user mode but now in kernel mode.
+; We start with the I/O area and 24K ROM mapped in.
+; D holds the first argument to the system call
+; and X holds the system call number.
 
-	ldd	#kernstack-16	; Copy to the kernel stack
-	pshs	D
-	pshs	X		; from the user's stack
-	ldd	#16		; 16 bytes of syscall args
-	jsr	rommemcpy	; Do the copy and pop the pushed arguments
-	leas	4,S
-
-	ldd	userd		; Get back the registers
-	ldx	userx
-	jsr	[syscalltable,X] ; Call the relevant system call
-	lds	usersp		; Get back the user's stack pointer
+swi2handler:
 	tfr	D,Y		; Save D temporarily
-	lda	#8		; Replace the kernel data with user code
+	lda	#0		; Bring back in the kernel data area
+	sta	pte0
 	sta	frame0
+	tfr	Y,D		; Get D back
+	jsr	[syscalltable,X] ; Call the relevant system call
+	tfr	D,Y		; Save D temporarily
+	lda	uframe0		; Replace the kernel data with user code
 	sta	pte0
 	tfr	Y,D		; Get D back
 	ldx	errno		; and put errno in the X register.
+	std	1,S		; Save any return value in the D register
+	stx	4,S		; and any errno value in the X register.
 	jmp	swi2end
 
 ; The 256 bytes of ROM which is always mapped in to memory
 	.section .toprom, "acrx"
 
-zeroram:
-	sta	disablerom
-	clra			; Clear all of RAM
-	clrb
-	tfr	D,X
-.1:	std	,X++
-	cmpx	#0xFE00
-	bne	.1
-	sta	enablerom
-	jmp	reset1
-
-; Turn on the 32K ROM before starting the reset code
-preset:
-	sta	enablerom
-	jmp	reset
-	
-; The user's code has been loaded into memory, D holds the
-; arg count and the new stack pointer value is on the stack.
+; void jmptouser(int memsize, int argc, char *destbuf)
+;
+; The user's code has been loaded into memory. We need to
+; copy the arguments to the top of stack and start the code
+; executing. D holds the amount of data to copy, with the
+; argv and the new stack pointer value are on the stack.
 jmptouser:
 	.global jmptouser
-	sta	disablerom	; Turn off the 32K of ROM
-	lds	2,S		; Set the new stack pointer value
-	pshs	D		; Save D as we need to use it
-	lda	#8		; Take away the kernel data on page zero and
-	sta	frame0		; replace with the user code. Record frame 8
-	sta	pte0		; is now at page zero.
-	puls	D		; Get D back
+	ldx	2,S		; Save the argc for now
+	stx	userd
+	ldx	4,S		; Save the destbuf pointer for now
+	stx	userx
+	pshs	X		; Set up args for rommemcpy
+	ldx	#execbuf
+	pshs	X
+	jsr	rommemcpy	; Copy the arguments
+
+	lds	userx		; Set the new stack pointer value
+	ldd	userd		; Get the argc value
+	tfr	D,Y		; Save D as we need to use it
+	lda	uframe0		; Take away the kernel data on page zero and
+	sta	pte0		; replace with the user code.
+	tfr	Y,D		; Get D back
 	sta	disableio	; Turn off the I/O area
 	jmp	usercode	; Now jump to the executable's start address
 
@@ -421,7 +427,7 @@ jmptouser:
 
 rommemcpy:
 	.global rommemcpy
-	sta	disablerom	; Turn off the 32K of ROM
+	sta	disablerom	; Turn off the 24K of ROM
 	pshs	Y		; Save the Y register. Args now 4,S and 6,S.
 	ldx	4,S		; Get the source pointer
 	ldy	6,S		; Get the destination pointer
@@ -435,7 +441,7 @@ rommemcpy:
 	bne	.1		; Not yet, loop back
 
 	puls	Y		; Restore the Y register
-	sta	enablerom	; Turn on the 32K of ROM
+	sta	enablerom	; Turn on the 24K of ROM
 	rts
 
 ; void romstrncpy(int count, void *src, void *dst)
@@ -444,7 +450,7 @@ rommemcpy:
 ; byte is copied. Ensure the dest buffer is NUL terminated.
 romstrncpy:
 	.global romstrncpy
-	sta	disablerom	; Turn off the 32K of ROM
+	sta	disablerom	; Turn off the 24K of ROM
 	pshs	Y		; Save the Y register. Args now 4,S and 6,S.
 	ldx	4,S		; Get the source pointer
 	ldy	6,S		; Get the destination pointer
@@ -461,14 +467,14 @@ romstrncpy:
 	clr	-1,Y		; We copied count, so put a NUL at the end
 .2:
 	puls	Y		; Restore the Y register
-	sta	enablerom	; Turn on the 32K of ROM
+	sta	enablerom	; Turn on the 24K of ROM
 	rts
 
 ; int romstrlen(char *): count the length of a string
 ; which could be in userspace
 romstrlen:
 	.global romstrlen
-	sta	disablerom	; Turn off the 32K of ROM
+	sta	disablerom	; Turn off the 24K of ROM
 	tfr	D,X		; Get the pointer into X
 	clra			; Set the count to zero
 	clrb
@@ -478,7 +484,7 @@ romstrlen:
 	addd	#1		; Else increment the count and loop back
 	bra	.1
 .2:
-	sta	enablerom	; Turn on the 32K of ROM
+	sta	enablerom	; Turn on the 24K of ROM
 	rts
 
 ; UART IRQ Handler
@@ -516,36 +522,9 @@ ch375firq:
 	puls	a
 	rti
 
-; SWI2 handler. We start with the I/O area in and 32K ROM mapped out.
-; The stack pointer is valid but could be pointing into upper memory.
-; D holds the first argument to the system call, 
-; and X holds the system call number.
-
-swi2handler:
-	tfr	D,Y
-	lda	#0		; Bring back in the kernel data area
-	sta	pte0
-	sta	frame0
-	tfr	Y,D
-	std	userd		; Save the registers we will use
-	stx	userx
-	leax	14,S		; Get the address of the syscall arguments on user stack
-	sta	enablerom	; Turn on the 32K of ROM
-	jmp	swi2middle
 swi2end:
-	sta	disablerom	; Turn off the 32K of ROM
-	std	1,S		; Save any return value in the D register
-	stx	4,S		; and any errno value in the X register.
 	sta	disableio	; Disable the I/O area
 	rti			; and return from the SWI
-
-; The initial argv[] used to start /bin/sh
-initargv:
-	.global initargv
-	.word	binsh		; Pointer to the string
-	.word	0		; NULL argv[1]
-binsh:
-	.string "/bin/sh"
 
 ; The vector table for SWI2, SWI, NMI, IRQ, FIRQ and reset.
 	.section .vectors, "acrx"
@@ -554,4 +533,4 @@ binsh:
 	.word	uartirq
 	.word	0x1234
 	.word	0x5678
-	.word	preset
+	.word	reset

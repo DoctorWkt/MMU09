@@ -1,8 +1,9 @@
 struct file {
-  enum { FD_NONE, FD_CONSOLE, FD_INODE } type;
+  enum { FD_NONE, FD_CONSOLE, FD_PIPE, FD_INODE } type;
   Int ref;			// reference count
   char readable;
   char writable;
+  struct pipe *pipe;
   struct inode *ip;
   xvoff_t off;
 };

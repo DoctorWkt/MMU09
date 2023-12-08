@@ -3,6 +3,7 @@ struct file;
 struct inode;
 struct xvstat;
 struct superblock;
+struct pipe;
 
 // XXX
 void panic(char *);
@@ -18,7 +19,9 @@ void brelse(struct buf *);
 void bwrite(struct buf *);
 
 // cprintf.c
+#ifndef CPRINTF_REDEFINED
 void cprintf(char *fmt, ...);
+#endif
 
 // file.c
 struct file *filealloc(void);
@@ -65,7 +68,7 @@ int romgetputc(void);
 int ch375init(void);
 int readblock(unsigned char *buf, long lba);
 int writeblock(unsigned char *buf, long lba);
-void jmptouser(Int, void *);
+void jmptouser(Int memsize, Int argc, char *destbuf);
 void set_errno(Int);
 
 // syscall.c
@@ -77,19 +80,47 @@ Int fetchstr(Uint, char **);
 
 // sysfile.c
 Int sys_dup(Int fd);
-Int sys_read(Int fd, char *p, Int n);
-Int sys_write(Int fd, char *p, Int n);
+Int kread(Int fd, char *p, Int n);
+Int sys_read(Int fd, long d1, long d2, long d3, int d4, char *p, Int n);
+Int kwrite(Int fd, char *p, Int n);
+Int sys_write(Int fd, long d1, long d2, long d3, int d4, char *p, Int n);
 Int sys_close(Int fd);
-Int sys_fstat(Int fd, struct xvstat *st);
-Int sys_link(char *old, char *new);
+Int sys_fstat(Int fd, long d1, long d2, long d3, int d4, struct xvstat *st);
+Int sys_link(char *old, long d1, long d2, long d3, int d4, char *new);
 Int sys_unlink(char *path);
-Int sys_open(char *path, Int omode);
+Int kopen(char *path, Int omode);
+Int sys_open(char *path, long d1, long d2, long d3, int d4, Int omode);
 Int sys_mkdir(char *path);
 Int sys_chdir(char *path);
+int sys_pipe(int *fd);
 void sys_init(void);		// For now!
 
 // exit.c
 extern char userbuf[512];
+
+/* proc.c */
+void copypage(char *from, char toframe);
+int fork1(void);
+void exec(int argc, char *argv[]);
+void sched(void);
+void sched1(void);
+void sys_exit(int exitvalue);
+void sleepchan(void *chan);
+int sys_wait(int *statusptr);
+void wakeup(void *chan);
+void procinit(void);
+void sys_exec(int argc, long d0, long d1, long d2, int d3, char *argv[]);
+int sys_getpid(void);
+int kkill(int pid);
+int sys_kill(int pid);
+extern struct proc *curproc;
+
+/* pipe.c */
+void pipeinit(void);
+int pipealloc(struct file **f0, struct file **f1);
+void pipeclose(struct pipe *p, int writable);
+int pipewrite(struct pipe *p, char *addr, int n);
+int piperead(struct pipe *p, char *addr, int n);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

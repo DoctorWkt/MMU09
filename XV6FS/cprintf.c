@@ -1,5 +1,6 @@
 #include <string.h>
 #include <errno.h>
+#define CPRINTF_REDEFINED
 #include <xv6/types.h>
 #include <xv6/defs.h>
 #include <xv6/param.h>
@@ -33,7 +34,8 @@ static void printint(int xx, int base, int sign) {
 }
 
 // Print to the console. only understands %d, %x, %p, %s.
-void cprintf(char *fmt, uint fred, ...) {
+// The dummy argument is to get the argp to work
+void cprintf(char *fmt, uint dummy, ...) {
   int i, c, locking;
   uint *argp;
   char *s;
@@ -43,7 +45,7 @@ void cprintf(char *fmt, uint fred, ...) {
     return;
 
   // argp = (uint *) (void *) (&fmt + 1);
-  argp = (uint *) &fred;
+  argp = (uint *) &dummy;
   for (i = 0; (c = fmt[i] & 0xff) != 0; i++) {
     if (c != '%') {
       romputc(c);

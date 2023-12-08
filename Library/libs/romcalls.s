@@ -22,8 +22,10 @@ romputc:
 	ldx #0x04
 	jmp swi2call
 
-spawn:
-	.global spawn
+; Slightly different arguments than Unix:
+; void sys_exec(int argc, char *argv[])
+sys_exec:
+	.global sys_exec
 	ldx #0x06
 	jmp swi2call
 
@@ -105,4 +107,31 @@ sys_write:
 _tcattr:
 	.global _tcattr
 	ldx #0x1e
+	jmp swi2call
+
+fork:
+	.global fork
+	ldx #0x20
+	jmp swi2call
+
+wait:
+	.global wait
+	ldx #0x22
+	jmp swi2call
+
+getpid:
+	.global getpid
+	ldx #0x24
+	jmp swi2call
+
+; This syscall only uses the first argument: the pid.
+; Any other argument is ignored and treated as SIGKILL.
+kill:
+	.global kill
+	ldx #0x26
+	jmp swi2call
+
+pipe:
+	.global pipe
+	ldx #0x28
 	jmp swi2call

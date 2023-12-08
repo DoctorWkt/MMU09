@@ -1,3 +1,4 @@
+#define CPRINTF_REDEFINED
 #include <string.h>
 #include <stdio.h>
 #include <romcalls.h>

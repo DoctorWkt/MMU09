@@ -15,16 +15,19 @@
 // provide access to the I/O devices. This occurs when
 // an SWI instruction occurs, or when the CPU takes an interrupt.
 //
-// When the 32K ROM is enabled, the top 32K of the address space is
-// ROM except for the 256 byte I/O area.
+// When the 24K ROM is enabled, it is mapped from $2000-$7FFF.
+// The top 256 bytes of memory is always ROM, the same as the $7Fxx ROM range.
 
 #define PAGESIZE 8192
 #define NUMFRAMES  64
 #define NUMPAGES    8
 
+// Externs
+extern unsigned cPC;
+
 // Static Variables
 static int io_active[4];		// In kernel mode with I/O active?
-static int rom_mapped[4];		// Is the 32K ROM mapped in?
+static int rom_mapped[4];		// Is the 24K ROM mapped in?
 static int io_idx= 0;			// Index into these arrays
 
 struct pagetable {			// The page table
@@ -34,7 +37,7 @@ struct pagetable {			// The page table
 
 UINT8 *frame[NUMFRAMES];		// The 64 8K frames
 
-UINT8 ROM[PAGESIZE * (NUMPAGES/2)];	// The 32K of ROM
+UINT8 ROM[PAGESIZE * (NUMPAGES/2)];	// The 32K of ROM (only 24K used)
 
 // Set up the initial memory map
 void init_memory(void) {
@@ -49,11 +52,11 @@ void init_memory(void) {
   }
 
   // Put us into kernel mode and activate the I/O area.
-  // Keep the 32K ROM deactivated.
+  // Keep the 24K ROM deactivated.
   // Point the pages to the first eight frames. Mark them as valid.
   io_idx = 0;
   io_active[0] = 1;
-  rom_mapped[0] = 0;
+  rom_mapped[0] = 1;
   for (int i=0; i < NUMPAGES; i++) {
     pte[i].frame= frame[i];
     pte[i].pteval= i;
@@ -116,8 +119,8 @@ UINT8 memory(unsigned addr) {
       }
   }
 
-  // Top half of memory is ROM if the 32K ROM is mapped in
-  if (rom_mapped[io_idx] && addr >= 0x8000) {
+  // Addresses $2000 - $7FFF are ROM if the ROM is mapped in
+  if (rom_mapped[io_idx] && addr >= 0x2000 && addr < 0x8000) {
     return(ROM[addr & 0x7fff]);
   }
 
@@ -180,18 +183,18 @@ void set_memory(unsigned addr, UINT8 data) {
           if (recv_ch375_cmd(data)) firq();
           return;
         case 0xfe50:
- 	  // Disable the 32K ROM
+ 	  // Disable the 24K ROM
 // printf("rom unmapped\n");
 	  rom_mapped[io_idx]= 0;
           return;
         case 0xfe51:
- 	  // Enable the 32K ROM
+ 	  // Enable the 24K ROM
 // printf("rom mapped\n");
 	  rom_mapped[io_idx]= 1;
           return;
         case 0xfe60:
 // printf("I/O disabled\n");
-	  // Go to user mode and map out the I/O area and 32K ROM.
+	  // Go to user mode and map out the I/O area and 24K ROM.
 	  // Also go back to io_idx zero.
 	  io_idx= 0;
 	  io_active[0]= 0;
@@ -206,14 +209,14 @@ void set_memory(unsigned addr, UINT8 data) {
         case 0xfe76:
         case 0xfe77:
 	  // Update a page table entry
-// printf("Setting pte%d to 0x%x\n", addr & (NUMPAGES-1), data);
+// printf("   Setting pte%d to 0x%x at PC 0x%04x\n", addr & (NUMPAGES-1), data, cPC);
 	  pagenum= addr & (NUMPAGES-1);
 	  framenum= data & (NUMFRAMES-1);
 	  pte[pagenum].frame= frame[framenum];
 	  pte[pagenum].pteval= data;
 	  return;
         case 0xfe80:
-	  // Drop back to a previous I/O and 32K ROM mapping
+	  // Drop back to a previous I/O and 24K ROM mapping
 	  io_idx--;
 // printf("Moved io_idx down to %d: %d %d\n",
 //	io_idx, io_active[io_idx], rom_mapped[io_idx]);
@@ -228,8 +231,8 @@ void set_memory(unsigned addr, UINT8 data) {
       }
   }
    
-  // Top half of memory is ROM
-  if (rom_mapped[io_idx] && addr >= 0x8000) {
+  // Addresses $2000 - $7FFF are ROM if the ROM is mapped in
+  if (rom_mapped[io_idx] && addr >= 0x2000 && addr < 0x8000) {
     fprintf(stderr, "ROM write 2 at 0x%04x PC 0x%04x SP 0x%04x in set_memory()\n",
 	addr, get_pc(), get_s());
     return;
@@ -261,8 +264,8 @@ void set_initial_memory(unsigned addr, UINT8 data) {
 	addr, get_pc()); exit(1);
   }
 
-  // Write to ROM if the top half of memory
-  if (addr >= 0x8000) {
+  // Write to ROM if the address is $2000-$7FFF or $FF00-$FFFF
+  if ((addr >= 0x2000 && addr < 0x8000) || addr >= 0xff00) {
       ROM[addr & 0x7fff]= data; return;
   }
 
@@ -272,7 +275,7 @@ void set_initial_memory(unsigned addr, UINT8 data) {
   pte[pagenum].frame[offset]= data;
 }
 
-// Set kernel mode and make the I/O area visible
+// Set kernel mode and make the I/O area and 24K ROM visible
 void set_io_active(void) {
   // Move up to the next position, so we remember the previous settings
   io_idx++;
@@ -280,7 +283,7 @@ void set_io_active(void) {
     fprintf(stderr, "Too many stacked interrupts!\n"); exit(1);
   }
   io_active[io_idx] = 1;
-  rom_mapped[io_idx]= 0;
+  rom_mapped[io_idx]= 1;
 // printf("I/O mapped, ROM unmapped\n");
 // printf("Moved io_idx up to %d: %d %d\n",
 //	io_idx, io_active[io_idx], rom_mapped[io_idx]);

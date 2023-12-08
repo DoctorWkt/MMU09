@@ -27,6 +27,10 @@ extern int usleep(useconds_t __usecs);
 
 extern char **environ;
 
+// xv6 specific
+extern int sys_exec(int argc, char *argv[]);
+extern int exec(char *pathname, char *argv[]);
+
 extern const char * _findPath(const char *__pathname);
 extern int execl(const char *__pathname, const char *__arg0, ...);
 extern int execle(const char *__pathname, const char *__arg0, ...);

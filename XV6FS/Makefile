@@ -5,7 +5,8 @@ ASMFLAGS=-quiet -nowarn=62 -opt-branch -opt-offset -Fvobj
 CC= vc '+mmu09'
 CFLAGS= -O2
 KERNOBJS= romfuncs.o blk.o bio.o file.o fs.o sysfile.o \
-	exit.o cprintf.o memset.o strncpy.o strncmp.o lsl.o asrl.o div.o
+	proc.o pipe.o cprintf.o \
+	memset.o strncpy.o strncmp.o lsl.o asrl.o div.o
 
 .c.o:
 	$(CC) -c $(CFLAGS) $<
@@ -28,8 +29,9 @@ div.o:
 	co div.o
 
 xv6rom.img: xv6rom
-	srec_cat xv6rom -Motorola  -output temp -Binary
-	dd if=temp bs=32768 skip=1 of=xv6rom.img
+	srec_cat xv6rom -Motorola -output temp -Binary 2> /dev/null
+	dd if=temp bs=256 count=127 of=xv6rom.img
+	dd if=temp bs=256 skip=255 count=1 >> xv6rom.img
 	rm -f temp
 
 sfiles: blk.c bio.c file.c fs.c sysfile.c

@@ -25,7 +25,7 @@ module icarus_tb();
   initial begin        
     $dumpfile("test.vcd");
     $dumpvars(0, icarus_tb);
-    #2000000 $finish;      		// Terminate simulation
+    #200000 $finish;      		// Terminate simulation
   end
 
   // Clock generator
@@ -33,6 +33,7 @@ module icarus_tb();
     #HalfClock clk = ~clk; // Toggle clk every HalfClock to make a full cycle
   end
 
+`ifdef SEND_NMI
   // We have a counter so that we can send interrupts at certain times
   always @(posedge eclk) begin
     intctr = intctr + 1;
@@ -41,6 +42,7 @@ module icarus_tb();
     if (intctr == 32'h000001c5)
       nmi_n = 1'b1;
   end
+`endif
   
   // Generate the Q and E clock signals
   // and raise reset_n after a while

@@ -43,6 +43,6 @@ extern pid_t waitpid(pid_t __pid, int *__stat_loc, int __options);
 /* Wait for a child to die.  When one does, put its status in *STAT_LOC
    and return its process ID.  For errors, return (pid_t) -1.
  */
-#define	wait(statloc)	waitpid(WAIT_ANY, statloc, 0)
+// #define	wait(statloc)	waitpid(WAIT_ANY, statloc, 0)
 
 #endif

@@ -138,7 +138,6 @@ extern int _umount(const char *dev, int flags);
 extern sighandler_t signal(int signum, sighandler_t sighandler);
 extern int dup2(int oldfd, int newfd);
 extern int _pause(unsigned int dsecs);
-extern int kill(pid_t pid, int sig);
 extern int pipe(int *pipefds);
 extern gid_t getgid(void);
 extern uid_t geteuid(void);

@@ -51,7 +51,9 @@ void fileclose(struct file *f) {
   f->ref = 0;
   f->type = FD_NONE;
 
-  if (ff.type == FD_INODE) {
+  if (ff.type == FD_PIPE)
+    pipeclose(ff.pipe, ff.writable);
+  else if (ff.type == FD_INODE) {
     iput(ff.ip);
   }
 }
@@ -76,6 +78,8 @@ Int fileread(struct file *f, char *addr, xvoff_t n) {
     set_errno(EINVAL);
     return -1;
   }
+  if (f->type == FD_PIPE)
+    return piperead(f->pipe, addr, n);
   if (f->type == FD_INODE) {
     ilock(f->ip);
     if ((r = readi(f->ip, addr, f->off, n)) > 0)
@@ -96,8 +100,10 @@ xvoff_t filewrite(struct file *f, char *addr, xvoff_t n) {
     set_errno(EINVAL);
     return -1;
   }
+  if(f->type == FD_PIPE)
+    return pipewrite(f->pipe, addr, n);
   if (f->type == FD_INODE) {
-    // write a few blocks at a time to avoid exceeding
+    // Write a few blocks at a time to avoid exceeding
     // the maximum log transaction size, including
     // i-node, indirect block, allocation blocks,
     // and 2 blocks of slop for non-aligned writes.

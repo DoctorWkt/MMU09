@@ -10,7 +10,7 @@ assert.o atexit.o atoi.o atoi_small.o atol.o bcmp.o bcopy.o bind.o bsearch.o \
 bzero.o cfmakeraw.o cfree.o cfspeed.o clock.o clock_getres.o \
 clock_gettime.o clock_settime.o confstr.o \
 connect.o creat.o crypt.o ctermid.o ctime.o ctime_r.o cuserid.o err.o \
-cprintf.o errno.o error.o exit.o fclose.o fdatasync.o \
+cprintf.o errno.o error.o exec.o exit.o fclose.o fdatasync.o \
 fflush.o fgetc.o fgetgrent.o fgetpos.o fgetpwent.o fgets.o fopen.o \
 fprintf.o fputc.o fputs.o fread.o fscanf.o fsetpos.o fsync.o \
 ftell.o fwrite.o getcwd.o getenv.o __getgrent.o getgrgid.o getgrnam.o \

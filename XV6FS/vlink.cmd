@@ -1,8 +1,8 @@
 MEMORY
 {
   ram  :  org = 0x0000, len = 0x2000
-  jump :  org = 0x8000, len = 0x0020
-  rom  :  org = 0x8020, len = 0x7DE0
+  jump :  org = 0x2000, len = 0x0030
+  rom  :  org = 0x2030, len = 0x5ED0
  trom  :  org = 0xFF00, len = 0x00F4
   vect :  org = 0xFFF4, len = 0x000C
 }

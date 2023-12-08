@@ -1,58 +1,55 @@
 #include <sys/types.h>
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
-#include <errno.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <romcalls.h>
-#include <termios.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 void cprintf(char *fmt, ...);
 
-char nl= 0x0A;
+int main(int argc, char *argv[]) {
+  int pid;
+  int wstatus;
+  int pipefd[2];
+  char buf[512];
 
-int main() {
-  char *start= (char *)0x3db0;
-  char *end= (char *)0x3def;
-  char *cstart= (char *)0x4db0;
-  char *cend= (char *)0x4def;
-  char *cptr;
-  char ch= ' ';
+  char *mesg= "Hello world!!\n";
 
-  
-  // Store stuff
-  for (cptr= start; cptr < end; cptr++)
-    *cptr= ch++;
+  cprintf("In the parent, about to open a pipe\n");
+  wstatus= pipe(pipefd);
+  cprintf("pipe returned %d\n", wstatus);
+  if (wstatus==-1) exit(1);
+  cprintf("pipe fds are %d and %d\n", pipefd[0], pipefd[1]);
 
-  // Print stuff to ensure it's OK
-  for (cptr= start; cptr < end; cptr++) {
-    romputc(*cptr & 0xff);
+  cprintf("In the parent, about to fork()\n");
+  pid= fork();
+
+  switch(pid) {
+    case 0:
+	// Close the pipe write end
+	close(pipefd[1]);
+	// Read from the pipe
+	wstatus = read(pipefd[0], buf, 512);
+	cprintf("In the child, pipe read returned %d\n", wstatus);
+	if (wstatus != -1) cprintf("pipe contents: %s\n", buf);
+	cprintf("In the child, about to exit(0)\n");
+	exit(0);
+
+    case -1:
+	cprintf("fork failed!\n");
+	exit(1);
+
+    default:
+	// Close the pipe read end
+	close(pipefd[0]);
+	// Write stuff down the pipe
+	cprintf("In the parent, about to write down the pipe\n");
+	write(pipefd[1], mesg, strlen(mesg)+1);
+	cprintf("In the parent, about to wait()\n");
+	pid= wait(&wstatus);
+	cprintf("wait returned pid %d status %x\n", pid, wstatus);
   }
 
-  // Wait for a keypress
-  romgetputc();
-
-  // Loop printing it out, which somehow alters the data
-  while (1) {
-    for (cptr= start; cptr < end; cptr++) {
-      cprintf("%x %x\n", cptr, *cptr & 0xff);
-    }
-    for (cptr= start; cptr < end; cptr++) {
-      romputc(*cptr & 0xff);
-    }
-    romputc('\n');
-
-    // Copy it
-    memcpy(cstart, start, end-start+1);
-    // Print the copy out
-    for (cptr= cstart; cptr < cend; cptr++) {
-      romputc(*cptr & 0xff);
-    }
-    romputc('\n');
-  }
-  _exit(0);
+  return(0);
 }

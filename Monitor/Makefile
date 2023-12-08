@@ -5,8 +5,9 @@ monitor.s19: monitor.asm
 	asm6809 -S -o monitor.s19 -l monitor.lst monitor.asm
 
 monitor.bin: monitor.s19
-	srec_cat monitor.s19 -Motorola -output temp -Binary
-	dd if=temp bs=32768 skip=1 of=monitor.bin
+	srec_cat monitor.s19 -Motorola -output temp -Binary 2> /dev/null
+	dd if=temp bs=256 count=127 of=monitor.bin
+	dd if=temp bs=256 skip=255 count=1 >> monitor.bin
 	rm -f temp
 
 user.s19: user.asm

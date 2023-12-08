@@ -3,6 +3,10 @@
 // Mostly argument checking, since we don't trust
 // user code, and calls into file.c and fs.c.
 //
+// Note that system calls with multiple arguments
+// have dummy arguments d1 .. d4. These "pad out"
+// the SWI stack frame so the functions see the
+// real arguments.
 
 #include <string.h>
 #include <errno.h>
@@ -13,10 +17,10 @@
 #include <xv6/fs.h>
 #include <xv6/file.h>
 #include <xv6/fcntl.h>
+#include <xv6/proc.h>
 
 #define SBUFSIZE 100
 char seekbuf[SBUFSIZE];		// Buffer to do lseek()
-struct file *ofile[NOFILE];	// Open files
 
 int errno;			// The kernel location of errno
 
@@ -29,7 +33,7 @@ void set_errno(Int err) {	// and the code to set it
 static int argfd(Int fd, Int * pfd, struct file **pf) {
   struct file *f;
 
-  if (fd < 0 || fd >= NOFILE || (f = ofile[fd]) == 0) {
+  if (fd < 0 || fd >= NOFILE || (f = curproc->ofile[fd]) == 0) {
     set_errno(EBADF); return(-1);
   }
   if (pfd) *pfd = fd;
@@ -43,8 +47,8 @@ static int fdalloc(struct file *f) {
   Int fd;
 
   for (fd = 0; fd < NOFILE; fd++) {
-    if (ofile[fd] == 0) {
-      ofile[fd] = f;
+    if (curproc->ofile[fd] == 0) {
+      curproc->ofile[fd] = f;
       return fd;
     }
   }
@@ -64,7 +68,7 @@ Int sys_dup(Int fd) {
   return fd;
 }
 
-Int sys_read(Int fd, char *p, Int n) {
+Int kread(Int fd, char *p, Int n) {
   struct file *f;
   char kp;
 
@@ -84,7 +88,11 @@ Int sys_read(Int fd, char *p, Int n) {
   return fileread(f, p, n);
 }
 
-Int sys_write(Int fd, char *p, Int n) {
+Int sys_read(Int fd, long d1, long d2, long d3, int d4, char *p, Int n) {
+  return(kread(fd, p, n));
+}
+
+Int kwrite(Int fd, char *p, Int n) {
   struct file *f;
   int i;
   char kch;
@@ -105,13 +113,17 @@ Int sys_write(Int fd, char *p, Int n) {
     return (Int) filewrite(f, p, n);
 }
 
+Int sys_write(Int fd, long d1, long d2, long d3, int d4, char *p, Int n) {
+  return(kwrite(fd, p, n));
+}
+
 Int sys_close(Int fd) {
   struct file *f;
 
   set_errno(0);
   if (argfd(fd, 0, &f) < 0)
     return -1;
-  ofile[fd] = 0;
+  curproc->ofile[fd] = 0;
   fileclose(f);
   return 0;
 }
@@ -119,7 +131,7 @@ Int sys_close(Int fd) {
 // The st argument lives in userspace and we might
 // not be able to see it. We fill in our own struct
 // and then copy it to the st argument.
-Int sys_fstat(Int fd, struct xvstat *st) {
+Int sys_fstat(Int fd, long d1, long d2, long d3, int d4, struct xvstat *st) {
   struct file *f;
   struct xvstat kernst;
   Int result;
@@ -138,7 +150,7 @@ Int sys_fstat(Int fd, struct xvstat *st) {
 }
 
 // Create the path new as a link to the same inode as old.
-Int sys_link(char *old, char *new) {
+Int sys_link(char *old, long d1, long d2, long d3, int d4, char *new) {
   char name[DIRSIZ];
   struct inode *dp, *ip;
 
@@ -305,7 +317,7 @@ static struct inode *create(char *path, short type) {
 
 void itrunc(struct inode *);
 
-Int sys_open(char *path, Int omode) {
+Int kopen(char *path, Int omode) {
   Int fd;
   Int type= FD_INODE;
   struct file *f;
@@ -368,6 +380,10 @@ Int sys_open(char *path, Int omode) {
   return fd;
 }
 
+Int sys_open(char *path, long d1, long d2, long d3, int d4, Int omode) {
+  return(kopen(path, omode));
+}
+
 Int sys_mkdir(char *path) {
   struct inode *ip;
 
@@ -411,13 +427,13 @@ Int sys_chdir(char *path) {
     return -1;
   }
   iunlock(ip);
-  iput(cwd);
-  cwd = ip;
+  iput(curproc->cwd);
+  curproc->cwd = ip;
   return 0;
 }
 
 // lseek code derived from https://github.com/ctdk/xv6
-xvoff_t sys_lseek(Int fd, xvoff_t offset, Int base)
+xvoff_t sys_lseek(Int fd, long d1, long d2, long d3, int d4, xvoff_t offset, Int base)
 {
         xvoff_t newoff;
         xvoff_t zerosize;
@@ -462,10 +478,40 @@ xvoff_t sys_lseek(Int fd, xvoff_t offset, Int base)
         return newoff;
 }
 
-// For now, intialise the filesystem data structures
+int sys_pipe(int *fd)
+{
+  struct file *rf, *wf;
+  int fd0, fd1;
+
+  // Error if fd points nowhere
+  if (fd==NULL) return(-1);
+
+  // Allocate a pipe struct
+  if(pipealloc(&rf, &wf) < 0)
+    return(-1);
+
+  // Allocate file descriptors
+  fd0 = -1;
+  if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
+    if(fd0 >= 0)
+      curproc->ofile[fd0] = 0;
+    fileclose(rf);
+    fileclose(wf);
+    return(-1);
+  }
+
+  // Copy the fds to userland
+  rommemcpy(2, &fd0, &fd[0]);
+  rommemcpy(2, &fd1, &fd[1]);
+  return(0);
+}
+
+// Intialise the filesystem data structures
 void sys_init(void) {
   ch375init();			// USB key
   binit();			// Buffer cache
   fileinit();			// File table
   iinit();			// Inode table
+  pipeinit();			// Pipe list
+  procinit();			// Launch the first process
 }

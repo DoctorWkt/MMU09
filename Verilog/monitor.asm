@@ -10,7 +10,7 @@ chdatawr	equ    $fe40
 chcmdrd		equ    $fe31
 chcmdwr		equ    $fe41
 
-; Addresses to enable/disable the 32K ROM
+; Addresses to enable/disable the 24K ROM
 ; and to disable the I/O area at $FExx
 disablerom	equ	$fe50
 enablerom	equ	$fe51
@@ -30,35 +30,55 @@ pte7		equ	$fe77
 stacktop	equ	$1fff
 
 ; Variables
-		org	$7780
+		org	$0000
 
 uartflg		fcb	#$00		; Flag indicating if there's a character in uartch, initially false
 uartch		fcb	#$00		; UART character available to read if uartflg==1
 
-; ROM starts at $8000 as it is a 32K part
-		org	$8000
-		nop
-
-; ROM code
-		org	$ff10
+; ROM starts at $2000 even though it is a 32K part
+		org	$2000
 
 main
+		lda	#$00		; Put 8K of RAM at $0000
+		sta	pte0
+                lda     #$04            ; and 32K of RAM from $8000 up
+                sta     pte4
+		lda	#$05
+                sta     pte5
+		lda	#$06
+                sta     pte6
 		lda	#$07
-		sta	pte7
-                lda     #$00            ; Set up 32K of RAM
-                sta     pte0
-		lda	#$01
-                sta     pte1
-		ldd	#$1234
-		std	$2000
-		lda	#$08
-                sta     pte1
-		ldd	#$5678
-		std	$2000
-		lda	#$01
-                sta     pte1
-		ldd	$2000
-		jmp	$ff00
+                sta     pte7
+		lda	#'W'		; Print out a character
+		sta	uartwr
+
+		lda	#'a'		; Check we can write to RAM
+		sta	$0000
+		lda	#'r'
+		sta	$8000
+		sta	$9000
+		lda	#'e'
+		sta	$C000
+		lda	#'n'
+		sta	$D000
+		lda	#$0A
+		sta	$E000
+
+		lda	$0000		; and read back from it
+		sta	uartwr
+		lda	$8000
+		sta	uartwr
+		lda	$9000
+		sta	uartwr
+		lda	$C000
+		sta	uartwr
+		lda	$D000
+		sta	uartwr
+		lda	$E000
+		sta	uartwr
+
+		lda	$ff00		; Try to stop the simulation
+loop		jmp	loop
 
 
 ; Vector table for the interrupt handlers and boot code

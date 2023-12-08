@@ -68,6 +68,8 @@ extern sighandler_t signal(int signum, sighandler_t sighandler);
 
 extern int raise(int __sig);
 
+extern int kill(int pid, int signo);
+
 typedef int sig_atomic_t;
 
 #endif

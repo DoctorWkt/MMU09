@@ -2,7 +2,9 @@
 #define ROMCALLS_H
 
 // cprintf.c
+#ifndef CPRINTF_REDEFINED
 void cprintf(char *fmt, ...);
+#endif
 
 // sysfile.c
 int sys_dup(int fd);
